@@ -20,48 +20,31 @@ from src import *
 from functools import reduce
 import rasterio
 from rasterio.io import MemoryFile
-
-
+import numpy as numpy
+from rasterio import transform
+from rasterio import features
+from rasterio.enums import MergeAlg
 
 from sklearn.preprocessing import MinMaxScaler
 
-def mask_raster(mask_df, raster_fp):
+def rasterize_geom(vector, value_field, raster):
+
+
+    #create tuples of geometry, value pairs, where value is the attribute value you want to burn
+    #vector = lclu
+    #value_field = 'COVERCODE'
+    #raster = clipped
+    geom_value = ((geom,value) for geom, value in zip(vector.geometry, vector[value_field]))
     
-    df = mask_df
-
-    inras = raster_fp
-
-    src  = rasterio.open(inras)
+    rasterized_geom = features.rasterize(geom_value,
+                                        out_shape = raster.shape,
+                                        transform = raster.transform,
+                                        all_touched = True,
+                                        fill = -5,   # background value
+                                        merge_alg = MergeAlg.replace,
+                                        dtype = np.float32)
     
-    def getFeatures(gdf):
-        """Function to parse features from GeoDataFrame in such a manner that rasterio wants them"""
-        import json
-        return [json.loads(gdf.to_json())['features'][0]['geometry']]
-    
-    coords = getFeatures(df)
-    clipped_array, clipped_transform = rasterio.mask.mask(dataset=src, shapes=coords, crop=True)
-
-    df = df.to_crs(src.crs)
-    out_meta = src.meta.copy()
-    out_meta.update({"driver": "GTiff",
-                    "height": clipped_array.shape[1],
-                    "width": clipped_array.shape[2],
-                    "transform": clipped_transform})
-    
-
-
-    with MemoryFile() as memfile:
-        with memfile.open(out_meta) as dataset:
-            yield dataset
-
-
-    
-    #return clipped
-
-    
-
-
-
+    return rasterized_geom
 
 def overlap_sjoin (target_layer, overlap_layer, field:str, stats=None):
 
