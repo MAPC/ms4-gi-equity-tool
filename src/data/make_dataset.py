@@ -5,52 +5,87 @@ import geopandas as gpd
 from pathlib import Path
 import pandas as pd
 import os
+
+#geodatabase for one of the data areas
+ms4_gdb = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Tool_Preprocessing.gdb'
+ms4_model_gdb = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
+
+print('Reading in municipal and regional boundaries...')
+
 #from dotenv import find_dotenv, load_dotenv
+munis_fp = "K:\\\DataServices\\Datasets\\Boundaries\\Spatial\\mapc_towns_poly.shp"
+munis = gpd.read_file(munis_fp)
 
-def get_landuse_data(muni):
-    '''
-    input = muni name
-    output = picks out the right shapefile from the state's municipal land use database;
-             makes a subdirectory in intermediate folder w town name and exports land use shapefile to it
-             reads that shapefile in as a geodataframe
+#mapc boundary 
+mapc_boundary = gpd.read_file(ms4_gdb, layer='MAPCBoundary')
 
-    '''
-    intermediate_path = "K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Analytical_Toolbox\\Data\\Intermediate"
-    mapc_lpd_fp = "K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Analytical_Toolbox\\Project_Files\\Parcel_Database\\MAPC_LandParcelDatabase.csv"
-    mapc_lpd = pd.read_csv(mapc_lpd_fp)
+print('Reading in land parcel database data...')
 
-    path = os.path.join(intermediate_path, muni)
+#MAPC land parcel database csv
+intermediate_path = "K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Analytical_Toolbox\\Data\\Intermediate"
+mapc_lpd_fp = "K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Analytical_Toolbox\\Project_Files\\Parcel_Database\\MAPC_LandParcelDatabase.csv"
+mapc_lpd = pd.read_csv(mapc_lpd_fp)
 
+print('Reading in public excluded land data...')
 
-    #set land  use variable
-    town_lu_path = ""
-    for dirpath, dirnames, filenames in os.walk(path):
-        for filename in filenames:
-            if filename.endswith('.shp'):
-                town_lu_path = os.path.join(dirpath, filename)
+#excluded public and institutional land
+public_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Compliance_Projects\\_State_Data\\_Reference_Layers\\Excluded_Land_Public_and_Institutional_Land.shp'
+public_inst_excluded_land = gpd.read_file(public_fp)
+public_groups = ['Public', 'Museum or library, Public', 'Education, Public', 'ROW potential',
+                 'Public, Education', 'cemetery, Public', 'Public, Cemetery', 'Hospital, Public']
+public_land = public_inst_excluded_land.loc[public_inst_excluded_land['GROUP_'].isin(public_groups)]
 
-    muni_state_parcels = gpd.read_file(town_lu_path).rename(columns={'LOC_ID': 'parloc_id'})
-    
-    muni_lpd_preprocess = muni_state_parcels.merge(mapc_lpd, on='parloc_id', how='left')
+#impervious features - extracted from lclu 2016 data and "simplify geometry" run in ArcGIS Pro
 
-    #unconstrained land area
+#print('Reading in impervious surfaces data...')
+#imperv_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Data\\Spatial\\Intermediate\\Franklin\\pler_imp_dissolve.shp'
+#imperv = gpd.read_file(imperv_fp)
 
-    #create a non-excluded land field, convert to acres 
-    muni_lpd_preprocess['non_exc'] = (muni_lpd_preprocess['SQFT'] - muni_lpd_preprocess['Tot_Exclud']) / 43560
-    
-    #total amount of excluded acres
-    muni_lpd_preprocess['exc_acres'] = muni_lpd_preprocess['Tot_Exclud'] / 43560
+print('Reading in additional data layers...')
+print('Wetlands...')
+#wetlands (will need to pare down)
+wetlands_fp = 'K:\\DataServices\\Datasets\\MassGIS\\Wetlands\\WETLANDSDEP_POLY.shp'
+wetlands = gpd.read_file(wetlands_fp)
+wetlands = wetlands.loc[wetlands['IT_VALDESC'] != 'OPEN WATER']
+#add the clipping info at some point
 
-    #total land are in acres
-    muni_lpd_preprocess['acreage'] = muni_lpd_preprocess['SQFT'] / 43560
+print('Watersheds...')
+#watersheds
+major_basins_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Watersheds\\MAJBAS_POLY.shp'
+major_basins = gpd.read_file(major_basins_fp)
 
-    #total amount of developable land
-    muni_lpd_preprocess['developable_land'] = muni_lpd_preprocess['acreage'] - muni_lpd_preprocess['exc_acres']
-    
-    #percent of land area that is not excluded
-    muni_lpd_preprocess['pct_developable'] = 1 - (muni_lpd_preprocess['exc_acres'] / muni_lpd_preprocess['acreage'])
+subbasins_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Watersheds\\SUBBASINS_POLY.shp'
+subbasins = gpd.read_file(subbasins_fp)
 
-    #muni_lpd_preprocess = muni_lpd_preprocess.rename(columns={'LOC_ID': 'parloc_id'})
+print('Wellhead protection areas...')
+#wellhead protection areas
+interim_wpa_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Wellhead_Protection_Areas\\IWPA_POLY.shp'
+zone1_wpa_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Wellhead_Protection_Areas\\ZONE1_POLY.shp'
+zone2_wpa_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Wellhead_Protection_Areas\\ZONE2_POLY.shp'
 
-    return(muni_lpd_preprocess)  
-    
+interim_wpa = gpd.read_file(interim_wpa_fp)
+zone1_wpa = gpd.read_file(zone1_wpa_fp)
+zone2_wpa = gpd.read_file(zone2_wpa_fp)
+
+#add this to make_dataset.py
+interim_wpa['wpa_type'] = 'Interim Wellhead Protection Area'
+zone1_wpa['wpa_type'] = 'Zone 1 Wellhead Protection Area'
+zone2_wpa['wpa_type'] = 'Zone 2 Wellhead Protection Area'
+
+combined_wpa = pd.concat([interim_wpa[['wpa_type', 'SITE_NAME', 'SUPPLIER', 'geometry']], 
+                        zone1_wpa[['wpa_type', 'SITE_NAME', 'SUPPLIER','geometry']], 
+                        zone2_wpa[['wpa_type', 'SUPPLIER','geometry']]]).reset_index()
+
+print('Activity use limitation areas...')
+#activity use limitation areas
+aul_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\AUL\\AUL_PT.shp'
+aul = gpd.read_file(aul_fp)
+
+print('ParkServe data...')
+#park serve priority areas data (this data is from 2022)
+parkserve_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
+parkserve_data = gpd.read_file(parkserve_fp, layer='TPL_parkserve_clip_mapc')
+
+#do a tree need assessment
+mapc_bgs_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
+mapc_bgs = gpd.read_file(mapc_bgs_fp, layer='mapc_2020_blockgroups')
