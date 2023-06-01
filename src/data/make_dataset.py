@@ -89,3 +89,9 @@ parkserve_data = gpd.read_file(parkserve_fp, layer='TPL_parkserve_clip_mapc')
 #do a tree need assessment
 mapc_bgs_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
 mapc_bgs = gpd.read_file(mapc_bgs_fp, layer='mapc_2020_blockgroups')
+
+#environmental justice
+ej_2020 = gpd.read_file(ms4_model_gdb, layer='ej_2020_bg_mapc')
+
+#urban heat island index
+heat_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Climate_Change\\MVP_MMC_Heat_MVP\\00 Task 2 Deliverables\\2.1 Attachments\\00 Uploaded to Sharepoint\\Shapefile_LSTIndex\\LSTindex.tif'

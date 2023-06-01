@@ -93,7 +93,7 @@ def rasterize_geom(vector, value_field, raster):
     
     return rasterized_geom
 
-def overlap_sjoin (target_layer, 
+def overlap_sjoin_hold (target_layer, 
                    overlap_layer, 
                    field:str, 
                    stats=None):
@@ -204,7 +204,7 @@ def calculate_overlap (parcel_data,
     data frame with parcel id, area of parcel overlapped by overlay layer, percent of parcel overlapped by overlay layer, and 
     percentile ranking for area of parcel overlapped by overlay layer. 
 
-    example = calculate percent of parcel that is within the 1/2 mile radius buffer
+    example = calculate percent of parcel that is within the 1/2 mile transit radius buffer
 
     '''
    
@@ -432,7 +432,6 @@ def parcel_norm_table(parcel_data,
 
     return parcels_with_ptile
 
-
 def if_overlap (parcel_data, 
                 id_field,
                 overlap_layer, 
@@ -490,7 +489,7 @@ def if_overlap (parcel_data,
         parcels_with_overlap[layer_name] = np.where(parcels_with_overlap['pct_' + layer_name] > overlap, 1, 0)   
 
         #define final table
-        parcels_with_overlap = parcels_with_overlap[[id_field, field, layer_name, ('sqm_' + layer_name), ('pct_' + layer_name), 'geometry']]
+        parcels_with_overlap = parcels_with_overlap[[id_field, field, layer_name, 'geometry']]
 
         return parcels_with_overlap
     
@@ -509,6 +508,8 @@ def if_overlap (parcel_data,
         parcels_with_overlap = parcels_with_overlap[[id_field, layer_name, field, 'geometry']]
 
         return parcels_with_overlap
+
+
 
 def calculate_suitability_criteria(
                                 how,
@@ -540,7 +541,6 @@ def calculate_suitability_criteria(
     valid = {
         'overlap_area', 
         'overlap_sjoin', 
-        'overlap_sjoin_stats', 
         'distance', 
         'parcel_ptile_rank', 
         'parcel_norm', 
@@ -657,80 +657,3 @@ def comp_hists(col_1, col_2, muni, df, category):
     plt.savefig(charts_muni_fp + '\\' + category + '_hist.png')
     plt.close(fig)  
 
-
-def tree_score(muni_boundary, muni_tree_canopy):
-    '''
-    
-    For each block group in the municipality, determines the relative concentration of 
-    tree canopy compared to all other block groups. Those in the bottom 40% of scores
-    are retained as having tree "need". Parcels or fishnet cells within those block groups can
-    then be prioritized higher.
-
-    '''
-    #this should eventually go over to build_features.py
-    from src.data.make_dataset import mapc_bgs
-
-    mapc_bgs['og_area'] = mapc_bgs['geometry'].area
-    muni_bgs = mapc_bgs.clip(muni_boundary)
-    muni_bgs['pct_bg'] = ((muni_bgs['geometry'].area) / (muni_bgs['og_area'])) * 100
-
-    #only keep block groups where 5% or more of the bg remains
-    muni_bgs = muni_bgs.loc[muni_bgs['pct_bg'] > 5]
-
-    muni_bgs_treecanopy = calculate_suitability_criteria(how='overlap_area', 
-                                                            id_field='bg20_id',
-                                                            parcel_data=muni_bgs, 
-                                                            join_data=muni_tree_canopy, 
-                                                            layer_name='tree')
-
-    #eliminate the slivers that remain 
-    muni_bgs_treecanopy = muni_bgs_treecanopy.loc[muni_bgs_treecanopy['geometry'].area > 1000]
-
-    #do a percentile ranking and create categories based on the ranking
-    muni_bgs_treecanopy['rnk_tree'] = muni_bgs_treecanopy['pct_tree'].rank(method='min', pct=True)
-
-    tree_need_rule = [
-                (muni_bgs_treecanopy['rnk_tree'] > 0.80),
-                (muni_bgs_treecanopy['rnk_tree'] <= 0.80) & (muni_bgs_treecanopy['rnk_tree'] > 0.60),
-                (muni_bgs_treecanopy['rnk_tree'] <= 0.60) & (muni_bgs_treecanopy['rnk_tree'] > 0.40),
-                (muni_bgs_treecanopy['rnk_tree'] <= 0.40) & (muni_bgs_treecanopy['rnk_tree'] > 0.20),
-                (muni_bgs_treecanopy['rnk_tree'] <= 0.20) & (muni_bgs_treecanopy['rnk_tree'] > 0)
-        ]
-
-    choices = ['Very high tree canopy', 'Moderately high tree canopy', 'Moderate tree canopy', 'Moderately low tree canopy', 'Very low tree canopy']
-
-    muni_bgs_treecanopy['tree_need'] = np.select(tree_need_rule, choices, default=np.nan)
-
-    #only keep bgs with the highest relative tree canopy need
-    muni_bgs_tree_need = muni_bgs_treecanopy.loc[muni_bgs_treecanopy['rnk_tree'] <= 0.4]
-
-    return muni_bgs_tree_need
-
-
-def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_structure_layer):
-    #calculate area of impervious cover
-    imperv_surfaces = calculate_suitability_criteria(how='overlap_area', 
-                                                id_field=id_field,
-                                                parcel_data=parcel_data, 
-                                                join_data=imprv_cover_layer, 
-                                                field='type',
-                                                layer_name='imp_cvr')
-    #calculate area of rooftops
-    imperv_rooftops = calculate_suitability_criteria(how='overlap_area', 
-                                                    id_field=id_field,
-                                                    parcel_data=parcel_data, 
-                                                    join_data=imprv_structure_layer, 
-                                                    field='type',
-                                                    layer_name='imp_rf')
-    #join together based on parloc id
-    imperv = imperv_surfaces.merge(imperv_rooftops[[id_field, 'sqm_imp_rf', 'pct_imp_rf']], 
-                                on=id_field, 
-                                how='inner')
-    
-    imperv['sqm_imprv'] = imperv['sqm_imp_cvr'] + imperv['sqm_imp_rf']
-    imperv['pct_imprv'] = imperv['sqm_imprv'] / imperv['geometry'].area
-    imperv['sqm_prv'] = imperv['geometry'].area - imperv['sqm_imprv']
-    imperv['pct_prv'] = 1 - imperv['pct_imprv']
-    imperv.insert((len(imperv.columns) - 1), 'geometry', imperv.pop('geometry'))
-    return(imperv)
-            
