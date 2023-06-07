@@ -26,10 +26,92 @@ from rasterstats import zonal_stats
 from rasterio import transform
 from rasterio import features
 from rasterio.enums import MergeAlg
-
 from sklearn.preprocessing import MinMaxScaler
+from shapely.validation import make_valid
 from src.features.build_features import *
+
 #from src.data.make_dataset import *
+
+row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\RightOfWay_Segmentation.gdb'
+eot_road_mapc = gpd.read_file(row_gdb, layer='EOTROADS_MAPC')
+
+def get_parcels_row(town_name, mapc_lpd):
+
+    '''
+    describe
+    '''
+
+    row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\ROW_model_output.gdb'
+
+    for layer_name in fiona.listlayers(row_gdb):
+        if town_name in layer_name:
+            town_row_layer = layer_name
+
+    town_row = gpd.read_file(row_gdb, layer=town_row_layer)
+    town_row = town_row.explode().reset_index(drop=True)
+
+
+    #prepare parcel layer wtih parcels and row segments
+    town_parcels = get_landuse_data(town_name, mapc_lpd)
+    town_parcels['muni'] = town_name
+    town_parcels['type'] = 'parcel'
+
+    town_parcels = town_parcels.overlay(town_row, how='difference')
+    #set up row layer
+
+    #don't need most field names
+    town_row = town_row[['poly_typ', 'geometry']]
+
+
+    #create ID field
+    muni_id = town_parcels.iloc[2]['muni_id'].astype(int)
+    print(muni_id)
+    town_row.insert(0, 'parloc_id', range(10000, 10000 + len(town_row)))
+    town_row['parloc_id'] = muni_id.astype(str) + '_ROW_' + town_row['parloc_id'].astype(str)
+
+    #create type and muni fields that will be consistent with the parcels fields
+    town_row['type'] = 'ROW segment'
+    town_row['muni'] = town_name
+    town_row['Owner'] = 'ROW segment'
+
+    #merge together ROW parcels with parcel data from 3a - final dataset for spatial operations
+    town_parcels_row = pd.concat([town_parcels, town_row]).reset_index()
+    town_parcels_row.geometry = town_parcels_row.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
+    
+    return town_parcels_row
+
+def get_lclu_muni(muni_gdf):
+    '''
+    describe
+    '''
+    ms4_model_gdb = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
+    lclu = gpd.read_file(ms4_model_gdb, layer="lclu_simplify_all_mapc", mask=muni_gdf)
+
+    #fix any geometry issues
+    lclu.geometry = lclu.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
+    lclu = lclu.clip(muni_gdf)
+    lclu = lclu.loc[lclu['geometry'].geom_type == 'Polygon']
+
+    #get phosphorous load per land cover geometry area
+    lclu['acres'] = lclu['geometry'].area / 4047
+    lclu['K_load'] = lclu['pler'] * lclu['acres']
+    return lclu
+
+def get_tree_canopy_lc(lclu_muni):
+    '''
+    describe
+    '''
+    #tree canopy using land use
+    tree_canopy_covernames = ['Deciduous Forest', 'Evergreen Forest', 'Palustrine Forested Wetland']
+    lclu_treecanopy = lclu_muni.loc[lclu_muni['covername'].isin(tree_canopy_covernames)]
+
+    lclu_treecanopy.geometry = lclu_treecanopy.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
+
+    #fix geom inconsistnecies
+    lclu_treecanopy = lclu_treecanopy.explode()
+    lclu_treecanopy = lclu_treecanopy.loc[lclu_treecanopy['geometry'].geom_type == 'Polygon']
+    return lclu_treecanopy
+
 
 def tree_score(muni_boundary, muni_tree_canopy):
     '''
@@ -78,6 +160,9 @@ def tree_score(muni_boundary, muni_tree_canopy):
 
 
 def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_structure_layer):
+    '''
+    describe
+    '''
     #calculate area of impervious cover
     imperv_surfaces = calculate_suitability_criteria(how='overlap_area', 
                                                 id_field=id_field,
@@ -85,6 +170,7 @@ def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_str
                                                 join_data=imprv_cover_layer, 
                                                 field='type',
                                                 layer_name='imp_cvr')
+
     #calculate area of rooftops
     imperv_rooftops = calculate_suitability_criteria(how='overlap_area', 
                                                     id_field=id_field,
@@ -92,16 +178,26 @@ def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_str
                                                     join_data=imprv_structure_layer, 
                                                     field='type',
                                                     layer_name='imp_rf')
+    
+
     #join together based on parloc id
     imperv = imperv_surfaces.merge(imperv_rooftops[[id_field, 'sqm_imp_rf', 'pct_imp_rf']], 
                                 on=id_field, 
-                                how='inner')
+                                how='outer').fillna(0)
+        
+
     
     imperv['sqm_imprv'] = imperv['sqm_imp_cvr'] + imperv['sqm_imp_rf']
-    imperv['pct_imprv'] = imperv['sqm_imprv'] / imperv['geometry'].area
+    imperv['pct_imprv'] = (imperv['sqm_imprv'] / imperv['geometry'].area) * 100
     imperv['sqm_prv'] = imperv['geometry'].area - imperv['sqm_imprv']
-    imperv['pct_prv'] = 1 - imperv['pct_imprv']
+    imperv['pct_prv'] = 100 - imperv['pct_imprv']
+    imperv['acr_imprv'] = imperv['sqm_imprv'] / 4047
+    imperv['acr_imp_cvr'] = imperv['sqm_imp_cvr'] / 4047
+    imperv['acr_imp_rf'] = imperv['sqm_imp_rf'] / 4047
+    imperv['acr_prv'] = imperv['sqm_prv'] / 4047
+
     imperv.insert((len(imperv.columns) - 1), 'geometry', imperv.pop('geometry'))
+
     return(imperv)
 
 def heat_score (muni_boundary, heat_index_fp):
@@ -252,3 +348,56 @@ def get_K_load (parcel_data,
     os.remove(outRas)
 
     return parcel_pler_stats
+
+
+public_land_uses = ['Vacant, Selectmen or City Council, Other City or Town (Municipal)',
+    'Vacant, Selectmen or City Council (Municipal)',
+    'Vacant, Conservation (Municipal or County)',
+    'Improved, Selectmen or City Council (Municipal)',
+    'Vacant, District (County)', 'United States Government',
+    'Vacant, Education (Municipal or County)',
+    'Other (Charitable Org.)',
+    'Improved, Education (Municipal or County)',
+    'Improved, Other District (County)',
+    'Vacant, Other District (County)',
+    'Dept. of Conservation and Recreation (DCR) - Division of Water Supply Protection, Urban Parks (non-reimbursable)',
+    'Mass. Highway Dept. (MHD) (non-reimbursable)',
+    'Dept. of Conservation and Recreation (DCR) - Division of Urban Parks and Recreation (non-reimbursable)',
+    'EXEMPT', 
+    'Transportation Authority',
+    'Improved, Municipal Public Safety', 'Improved, District (County)',
+    'Dept. of Conservation and Recreation (DCR), Division of State Parks and Recreation',
+    '(formerly Municipalities/Districts.  Removed June 2009.)',
+    'Mass. Highway Dept. (MHD) (non-reimbursable), Gasoline Service Stations - providing engine repair or maintenance services, and fuel products',
+    'Dept. of Fish and Game, Environmental Law Enforcement (DFG, formerly DFWELE) (non-reimbursable)',
+    'Vacant, Selectmen or City Council (Municipal), Cemeteries (Charitable Org.)',
+    'Recreation, Active Use (Charitable Org.)',
+    'Improved, Selectmen or City Council, Other City or Town (Municipal)',
+    'Non Profit Industrial', 
+    'SEWER DEPT', 
+    'UNKNOWN OWNER V',
+    'municipal, Other Motor Vehicles Sales and Services',
+    'TOWN-PROP  MDL-00',
+    'Vacant, Conservation (Municipal or County), UNKNOWN OWNER V',
+    'IMPUTED - Transportation Authority',
+    'Vacant Land, UNKNOWN OWNER V',
+    "Dept. of Corrections (DOC) - Division of Youth Services,Mass. Military,State Police,Sheriffs' Depts. (non-reimbursable)",
+    'Utility Authority - Electric, Light, Sewer, Water',
+    'Military Division - Campgrounds',
+    'Comm. Of Mass. (Other, non-reimbursable)',
+    'Developable Residential Land, (formerly Municipalities/Districts.  Removed June 2009.)',
+    '(formerly Commonwealth of Massachusetts.  Removed June 2009.)',
+    '(formerly Municipalities/Districts.  Removed June 2009.), Condo-Off',
+    '(formerly Commonwealth of Massachusetts.  Removed June 2009.), Residential Condominium',
+    'Single Family Residential, (formerly Municipalities/Districts.  Removed June 2009.)',
+    'Condo-Off, (formerly Municipalities/Districts.  Removed June 2009.)',
+    #added additional uses
+    'Town Property Improved',
+    'Bus Transportation Facilities and Related Properties',
+    'IMPUTED - Housing Authority',
+    'Housing Authority',
+    'Vacant, Housing Authority',
+    'Improved, Tax Title/Treasurer',
+    'Vacant, Tax Title/Treasurer'
+    ]
+

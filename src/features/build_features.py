@@ -217,7 +217,7 @@ def calculate_overlap (parcel_data,
     overlap_parcels_overlay = parcel_data.overlay(overlap_layer, how='intersection')
     
     #get area of overlap for each parcel
-    overlap_parcels_overlay['sqm_' + layer_name] = overlap_parcels_overlay['geometry'].area  #convert meters to acres
+    overlap_parcels_overlay['sqm_' + layer_name] = overlap_parcels_overlay['geometry'].area  
     overlap_parcels_overlay = overlap_parcels_overlay.groupby(by=id_field).agg({('sqm_' + layer_name):'sum'}).reset_index()
     
 
@@ -225,16 +225,8 @@ def calculate_overlap (parcel_data,
     parcels_with_overlap = parcel_data.merge(overlap_parcels_overlay[[id_field, ('sqm_' + layer_name)]], on=id_field, how='left')
 
     #get percent of overlap for each aprcel
-    parcels_with_overlap['pct_' + layer_name] = (parcels_with_overlap['sqm_' + layer_name] / (parcels_with_overlap['geometry'].area)) 
+    parcels_with_overlap['pct_' + layer_name] = (parcels_with_overlap['sqm_' + layer_name] / (parcels_with_overlap['geometry'].area)) * 100
 
-
-    '''    #get normalized value for each parcel (for area of overlap only)
-    if inverse:
-        parcels_with_overlap['nrm_' + layer_name] = 1 - scaling(parcels_with_overlap, ('sqm_' + layer_name))
-
-    else:
-        parcels_with_overlap['nrm_' + layer_name] = scaling(parcels_with_overlap, ('sqm_' + layer_name))
-    '''
     #define final table
     parcels_with_overlap = parcels_with_overlap[[id_field, ('sqm_' + layer_name), ('pct_' + layer_name), 'geometry']]
 
@@ -294,7 +286,7 @@ def overlap_sjoin (parcel_data,
     #parcels_with_overlap['nrm_' + layer_name] = scaling(parcels_with_overlap, (field + '_' + stats))
 
     #define final table
-    parcels_with_overlap = parcels_with_overlap[[id_field, (field + '_' + stats), 'geometry']]
+    parcels_with_overlap = parcels_with_overlap[[id_field, (field + '_' + stats), 'geometry']].fillna(0)
 
     return parcels_with_overlap
     
@@ -332,8 +324,7 @@ def distance (parcel_data,
     parcel_distance = gpd.sjoin_nearest(parcel_data, distance_layer, how='left', distance_col = ('dst_' + layer_name))
     parcel_distance = parcel_distance.groupby(parcel_distance.index).agg('first')
 
-    #convert distance to miles
-    parcel_distance['dst_' + layer_name] = parcel_distance['dst_' + layer_name] / 1609
+    parcel_distance['dst_' + layer_name] = parcel_distance['dst_' + layer_name] 
 
     #normalize distance. want to prioritize closer distances so subtract from 1 
     parcel_distance['nrm_' + layer_name] = 1 - scaling(parcel_distance, ('dst_'+ layer_name))
@@ -486,7 +477,7 @@ def if_overlap (parcel_data,
         parcels_with_overlap['pct_' + layer_name] = (parcels_with_overlap['sqm_' + layer_name] / (parcels_with_overlap['geometry'].area)) 
 
         #assign a value of 1 for parcels that overlap more than 50% with overlay layer
-        parcels_with_overlap[layer_name] = np.where(parcels_with_overlap['pct_' + layer_name] > overlap, 1, 0)   
+        parcels_with_overlap[layer_name] = np.where(parcels_with_overlap['pct_' + layer_name] > overlap, 1, 0).astype(int)   
 
         #define final table
         parcels_with_overlap = parcels_with_overlap[[id_field, field, layer_name, 'geometry']]
