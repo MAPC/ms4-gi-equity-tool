@@ -336,6 +336,60 @@ def distance (parcel_data,
 
     return parcel_distance
 
+
+def distance_with_fields (parcel_data, 
+                            id_field, 
+                            fields:list,
+                            distance_layer, 
+                            layer_name:str):
+
+    '''
+    caclulates the distance from parcel boundaries to the nearest boundary of distance_layer
+
+    inputs: 
+    - parcel_data = parcel database that you are joining overlap layer with (can be pre-filtered for muni of interest for speed)
+    - distance_layer = the layer you are interested in getting the distance to
+    - fields(list) = list of fields you want to retain from the nearest geometry in the distance_layer 
+
+    output:
+    - distance field (meters)) for distance in meters from parcel boundary to nearest distance_layer boundary
+    - desired information about nearest distance_layer geometry
+
+    from nearest distance_layer feature
+
+    same as "near" in ArcGIS Pro https://pro.arcgis.com/en/pro-app/latest/tool-reference/analysis/near.htm
+
+    '''
+
+    #reproject all to mass mainland
+    mass_mainland_crs = "EPSG:26986"
+    parcel_data = parcel_data.to_crs(mass_mainland_crs)
+    distance_layer = distance_layer.to_crs(mass_mainland_crs)
+
+    #make a copy
+    parcel_distance = parcel_data.copy()
+
+    #use geopandas sjoin to get distance to nearest distance_layer
+    
+    parcel_distance = gpd.sjoin_nearest(parcel_data, distance_layer, how='left', distance_col = ('dst_' + layer_name))
+    parcel_distance = parcel_distance.groupby(parcel_distance.index).agg('first')
+
+    parcel_distance['dst_' + layer_name] = parcel_distance['dst_' + layer_name] 
+
+    fields_list = [id_field, ('dst_' + layer_name)]
+    
+    for field in fields:
+        fields_list.append(field)
+
+    parcel_distance = parcel_data.merge(parcel_distance[fields_list], on=id_field, how='left').fillna(0)
+
+    fields_list.append('geometry')
+
+    #define final table
+    parcel_distance = parcel_distance[fields_list]
+
+    return parcel_distance
+
 def parcel_ptile_table_outliers(parcel_data, 
                                 id_field,
                                 field_name:str, 

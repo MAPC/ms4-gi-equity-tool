@@ -70,6 +70,7 @@ def get_parcels_row(town_name, mapc_lpd, muni_shp):
     town_row['muni'] = town_name
     town_row['Owner'] = 'ROW segment'
     town_row['UseDesc'] = 'ROW segment'
+    town_row['acreage'] = town_row['geometry'].area / 4047
 
     #join row segments to road EOT layer to get street name in address field
     row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\RightOfWay_Segmentation.gdb'
@@ -78,7 +79,7 @@ def get_parcels_row(town_name, mapc_lpd, muni_shp):
 
     town_row = town_row.sjoin(eot_road_mapc, how="left")
     town_row['Address'] = town_row['STREETNAME']
-    town_row = town_row[['parloc_id', 'type', 'muni', 'Owner', 'Address', 'geometry']].groupby(by='parloc_id').agg('first').reset_index()
+    town_row = town_row[['parloc_id', 'type', 'muni', 'Owner', 'Address', 'acreage', 'geometry']].groupby(by='parloc_id').agg('first').reset_index()
 
 
     #merge together ROW parcels with parcel data from 3a - final dataset for spatial operations
@@ -410,3 +411,62 @@ public_land_uses = ['Vacant, Selectmen or City Council, Other City or Town (Muni
     'Vacant, Tax Title/Treasurer'
     ]
 
+def comm_vis_layer(id_field, parcel_data, town_center_data,comm_vis_data):
+
+    '''
+    define this and add comments but this is the community visibility layer!
+    inputs
+    outputs
+
+    ''' 
+
+    #distance to town centers
+
+    towncenter = calculate_suitability_criteria(how='distance', 
+                                                id_field=id_field,
+                                                parcel_data=parcel_data, 
+                                                join_data=town_center_data, 
+                                                layer_name='twncntr')
+
+    towncenter_rule = [
+                towncenter['dst_twncntr'] == 0,
+                towncenter['dst_twncntr'] != 0
+                ]
+
+    choices = [1, 0]
+
+    towncenter['twncntr'] = np.select(towncenter_rule, choices, default=np.nan)
+
+
+    comm_fields = ['NAME', 'TYPE']
+
+    comm_assets =  distance_with_fields (parcel_data = parcel_data, 
+                                        id_field = id_field, 
+                                        fields = comm_fields,
+                                        distance_layer = comm_vis_data, 
+                                        layer_name='comm')
+
+
+    comm_rule = [
+                comm_assets['dst_comm'] <= 100,
+                comm_assets['dst_comm'] > 100
+                ]
+
+    choices = [1, 0]
+
+    comm_assets['comm'] = np.select(comm_rule, choices, default=np.nan)
+    comm_assets = comm_assets.rename(columns = {"NAME": "comm_name", "TYPE": "comm_type"})
+
+
+    comm_vis = towncenter.merge(comm_assets, on=[id_field, 'geometry'], how='inner')
+
+    comm_vis_rule = [
+        ((comm_vis['twncntr'] == 1) | (comm_vis['comm'] == 1)),
+        ((comm_vis['twncntr'] != 1) & (comm_vis['comm'] != 1))
+    ]
+
+    choices = [1, 0]
+
+    comm_vis['commvis'] = np.select(comm_vis_rule, choices, default=np.nan)
+    
+    return comm_vis

@@ -84,3 +84,12 @@ ej_2020 = gpd.read_file(ms4_model_gdb, layer='ej_2020_bg_mapc')
 
 #urban heat island index
 heat_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Climate_Change\\MVP_MMC_Heat_MVP\\00 Task 2 Deliverables\\2.1 Attachments\\00 Uploaded to Sharepoint\\Shapefile_LSTIndex\\LSTindex.tif'
+
+
+#town centers
+town_center_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Analytical_Toolbox\\Project_Files\\City_TownCenters\\city_towncenters.shp'
+town_center = gpd.read_file(town_center_fp)
+
+#community visibility layer, see R script 
+community_vis_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Data\\Spatial\\Community_Visibility\\CommunityVisabilityLayer.shp'
+community_vis = gpd.read_file(community_vis_fp)

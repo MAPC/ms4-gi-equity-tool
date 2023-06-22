@@ -207,6 +207,13 @@ def parcel_ms4_model(town_name, processed_path):
                                             layer_name='ej',
                                             overlap=0.05)
     
+
+    #is it visible in the community?
+    comm_vis = comm_vis_layer(id_field = 'parloc_id', 
+                                parcel_data = town_parcels_row, 
+                                town_center_data = town_center,
+                                comm_vis_data = community_vis)
+    
     #how close is it to the drainage network?
     #first identify the drainage network - let's just do lines for now.
     drainage_network_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\Drainage_network.gdb'
@@ -270,6 +277,7 @@ def parcel_ms4_model(town_name, processed_path):
         tree_need,
         heat_vln,
         ej,
+        comm_vis,
         soils,
         drainage_lines,
         drainage_pts
