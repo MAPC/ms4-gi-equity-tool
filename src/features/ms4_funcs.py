@@ -32,10 +32,7 @@ from src.features.build_features import *
 
 #from src.data.make_dataset import *
 
-row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\RightOfWay_Segmentation.gdb'
-eot_road_mapc = gpd.read_file(row_gdb, layer='EOTROADS_MAPC')
-
-def get_parcels_row(town_name, mapc_lpd):
+def get_parcels_row(town_name, mapc_lpd, muni_shp):
 
     '''
     describe
@@ -59,13 +56,12 @@ def get_parcels_row(town_name, mapc_lpd):
     town_parcels = town_parcels.overlay(town_row, how='difference')
     #set up row layer
 
-    #don't need most field names
-    town_row = town_row[['poly_typ', 'geometry']]
 
+    #don't need most field names
+    town_row = town_row[['poly_typ','geometry']]
 
     #create ID field
     muni_id = town_parcels.iloc[2]['muni_id'].astype(int)
-    print(muni_id)
     town_row.insert(0, 'parloc_id', range(10000, 10000 + len(town_row)))
     town_row['parloc_id'] = muni_id.astype(str) + '_ROW_' + town_row['parloc_id'].astype(str)
 
@@ -73,6 +69,17 @@ def get_parcels_row(town_name, mapc_lpd):
     town_row['type'] = 'ROW segment'
     town_row['muni'] = town_name
     town_row['Owner'] = 'ROW segment'
+    town_row['UseDesc'] = 'ROW segment'
+
+    #join row segments to road EOT layer to get street name in address field
+    row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\RightOfWay_Segmentation.gdb'
+    eot_road_mapc = gpd.read_file(row_gdb, layer='EOTROADS_MAPC', mask=muni_shp)
+    eot_road_mapc = eot_road_mapc.to_crs(town_parcels.crs)
+
+    town_row = town_row.sjoin(eot_road_mapc, how="left")
+    town_row['Address'] = town_row['STREETNAME']
+    town_row = town_row[['parloc_id', 'type', 'muni', 'Owner', 'Address', 'geometry']].groupby(by='parloc_id').agg('first').reset_index()
+
 
     #merge together ROW parcels with parcel data from 3a - final dataset for spatial operations
     town_parcels_row = pd.concat([town_parcels, town_row]).reset_index()
@@ -202,22 +209,25 @@ def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_str
 
 def heat_score (muni_boundary, heat_index_fp):
     '''
-    
+
     For each block group in the municipality, determines the relative heat index score compared to all other block groups. 
     Those in the top 40% of scores
     are retained as having heat "vulnerability". Parcels or fishnet cells within those block groups can
     then be prioritized higher.
 
+    Inputs: Muni boundary (gdf), heat index raster (geotiff)
+    Outputs: 
+
     '''
     from rasterstats import zonal_stats
+    from src.data.make_dataset import mapc_blocks
+
 
     with rasterio.open(heat_index_fp) as raster:
         transform = raster.transform
         lst = raster.read(1).astype('float64')
 
     #read in census blocks, clip to muni and eliminate sliver blocks that remain
-    mapc_blocks_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
-    mapc_blocks = gpd.read_file(mapc_blocks_fp, layer='mapc_2020_blocks')
     mapc_blocks['og_area'] = mapc_blocks['geometry'].area
     muni_blocks = mapc_blocks.clip(muni_boundary)
     muni_blocks['pct_bg'] = ((muni_blocks['geometry'].area) / (muni_blocks['og_area'])) * 100
@@ -225,7 +235,7 @@ def heat_score (muni_boundary, heat_index_fp):
     #only keep block groups where 5% or more of the bg remains. Reset index for zonal stats
     muni_blocks = muni_blocks.loc[muni_blocks['pct_bg'] > 5].reset_index()
 
-    #run zonal stats on heat index
+    #run zonal stats on heat index - what is the mean lst index score across census block?
     lst_stats = pd.DataFrame(zonal_stats(muni_blocks, 
                                         lst, 
                                         affine=transform, 
@@ -356,7 +366,6 @@ public_land_uses = ['Vacant, Selectmen or City Council, Other City or Town (Muni
     'Improved, Selectmen or City Council (Municipal)',
     'Vacant, District (County)', 'United States Government',
     'Vacant, Education (Municipal or County)',
-    'Other (Charitable Org.)',
     'Improved, Education (Municipal or County)',
     'Improved, Other District (County)',
     'Vacant, Other District (County)',

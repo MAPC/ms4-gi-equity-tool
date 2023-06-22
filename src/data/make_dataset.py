@@ -26,20 +26,6 @@ intermediate_path = "K:\\DataServices\\Projects\\Current_Projects\\Housing\\Sect
 mapc_lpd_fp = "K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Analytical_Toolbox\\Project_Files\\Parcel_Database\\MAPC_LandParcelDatabase.csv"
 mapc_lpd = pd.read_csv(mapc_lpd_fp)
 
-print('Reading in public excluded land data...')
-
-#excluded public and institutional land
-public_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Compliance_Projects\\_State_Data\\_Reference_Layers\\Excluded_Land_Public_and_Institutional_Land.shp'
-public_inst_excluded_land = gpd.read_file(public_fp)
-public_groups = ['Public', 'Museum or library, Public', 'Education, Public', 'ROW potential',
-                 'Public, Education', 'cemetery, Public', 'Public, Cemetery', 'Hospital, Public']
-public_land = public_inst_excluded_land.loc[public_inst_excluded_land['GROUP_'].isin(public_groups)]
-
-#impervious features - extracted from lclu 2016 data and "simplify geometry" run in ArcGIS Pro
-
-#print('Reading in impervious surfaces data...')
-#imperv_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Data\\Spatial\\Intermediate\\Franklin\\pler_imp_dissolve.shp'
-#imperv = gpd.read_file(imperv_fp)
 
 print('Reading in additional data layers...')
 print('Wetlands...')
@@ -54,7 +40,7 @@ print('Watersheds...')
 major_basins_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Watersheds\\MAJBAS_POLY.shp'
 major_basins = gpd.read_file(major_basins_fp)
 
-subbasins_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Watersheds\\SUBBASINS_POLY.shp'
+subbasins_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Watersheds\\NRCSHUC10_POLY.shp'
 subbasins = gpd.read_file(subbasins_fp)
 
 print('Wellhead protection areas...')
@@ -89,6 +75,9 @@ parkserve_data = gpd.read_file(parkserve_fp, layer='TPL_parkserve_clip_mapc')
 #do a tree need assessment
 mapc_bgs_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
 mapc_bgs = gpd.read_file(mapc_bgs_fp, layer='mapc_2020_blockgroups')
+
+mapc_blocks_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
+mapc_blocks = gpd.read_file(mapc_blocks_fp, layer='mapc_2020_blocks')
 
 #environmental justice
 ej_2020 = gpd.read_file(ms4_model_gdb, layer='ej_2020_bg_mapc')
