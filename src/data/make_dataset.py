@@ -90,6 +90,6 @@ heat_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Climate_Change\\MVP_MMC
 town_center_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Analytical_Toolbox\\Project_Files\\City_TownCenters\\city_towncenters.shp'
 town_center = gpd.read_file(town_center_fp)
 
-#community visibility layer, see R script 
+#community visibility layer, see R script src > features > ms4-comm-vis.R
 community_vis_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Data\\Spatial\\Community_Visibility\\CommunityVisabilityLayer.shp'
 community_vis = gpd.read_file(community_vis_fp)
