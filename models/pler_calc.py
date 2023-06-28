@@ -13,37 +13,39 @@ def plercalc():  # pler_calc
     SOILS_MUPOLYGON_TOP20_MAPCclip_3_ = "SOILS_MUPOLYGON_TOP20_MAPCclip"
 
     # Process: Calculate Field (3) (Calculate Field) (management)
-    pler_step1 = arcpy.management.CalculateField(in_table=lclu_simplify_all_mapc_1, field="pler", expression="pler(!covercode!, !usegencode!,)", code_block="""def pler(landcover, landuse):
-    if landcover== 21:
-        return -999
-    elif landcover == 2:
-        if (landuse == 10) or (landuse == 12):
-            return 2.32
-        elif (landuse == 3) or (landuse==4) or (landuse==9) or (landuse==20) or (landuse==30):
-            return 1.78 
-        elif landuse==55 :
-            return 1.95
-        elif (landuse == 6) or (landuse==7) or (landuse==0) or (landuse==2) or (landuse==8):
-            return 1.52
-        elif (landuse == 13) or (landuse==11):
-            return 1.96
-    elif landcover != 2:
-        if (landcover == 9) or (landcover ==10) or (landcover==12):
-            return 0.13
-        elif (landuse == 6) and ((landcover==5) or (landcover==8) or (landcover==13) or (landcover==14)or (landcover==15) or (landcover==16) or(landcover==17)or(landcover==19) or(landcover==20)):
-            return 0.13
-        elif (landcover == 6) or (landcover==7):
-            return 0.45
-        elif (landcover == 5) and (landuse== 7):
-            return 0.45
-        elif (landcover == 8) and (landuse== 7):
-            return 0.45
-        elif (landcover == 7) and (landuse== 6):
-            return 0.45
-        elif (landcover==5) or (landcover==8) or (landcover==13) or (landcover==14) or (landcover==15) or (landcover==16) or (landcover==17) or (landcover==18) or (landcover==19) or (landcover==20):
-            return 0
-    else:
-        return -999
+    pler_step1 = arcpy.management.CalculateField(in_table=lclu_simplify_all_mapc_1, field="pler", expression="pler(!covercode!, !usegencode!,)", code_block=
+                                                 
+    """def pler(landcover, landuse):
+        if landcover== 21:
+            return -999
+        elif landcover == 2:
+            if (landuse == 10) or (landuse == 12):
+                return 2.32
+            elif (landuse == 3) or (landuse==4) or (landuse==9) or (landuse==20) or (landuse==30):
+                return 1.78 
+            elif landuse==55 :
+                return 1.95
+            elif (landuse == 6) or (landuse==7) or (landuse==0) or (landuse==2) or (landuse==8):
+                return 1.52
+            elif (landuse == 13) or (landuse==11):
+                return 1.96
+        elif landcover != 2:
+            if (landcover == 9) or (landcover ==10) or (landcover==12):
+                return 0.13
+            elif (landuse == 6) and ((landcover==5) or (landcover==8) or (landcover==13) or (landcover==14)or (landcover==15) or (landcover==16) or(landcover==17)or(landcover==19) or(landcover==20)):
+                return 0.13
+            elif (landcover == 6) or (landcover==7):
+                return 0.45
+            elif (landcover == 5) and (landuse== 7):
+                return 0.45
+            elif (landcover == 8) and (landuse== 7):
+                return 0.45
+            elif (landcover == 7) and (landuse== 6):
+                return 0.45
+            elif (landcover==5) or (landcover==8) or (landcover==13) or (landcover==14) or (landcover==15) or (landcover==16) or (landcover==17) or (landcover==18) or (landcover==19) or (landcover==20):
+                return 0
+        else:
+            return -999
         
         
         

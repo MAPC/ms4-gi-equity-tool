@@ -215,36 +215,9 @@ def parcel_ms4_model(town_name, processed_path):
                                 comm_vis_data = community_vis)
     
     #how close is it to the drainage network?
-    #first identify the drainage network - let's just do lines for now.
-    drainage_network_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\Drainage_network.gdb'
-    for layer_name in fiona.listlayers(drainage_network_gdb):
-        if town_name in layer_name:
-            if 'lines' in layer_name:
-                town_drainage_lines_layer = layer_name
-
-    town_drainage_lines = gpd.read_file(drainage_network_gdb, layer=town_drainage_lines_layer)
-    town_drainage_lines = town_drainage_lines.explode().reset_index(drop=True)
-
-    drainage_lines = calculate_suitability_criteria(how='distance', 
-                                                    id_field='parloc_id',
-                                                    parcel_data=town_parcels_row, 
-                                                    join_data=town_drainage_lines,
-                                                    layer_name='drn_ln')
-
-    #how close is it to the nearest catch basin?
-    for layer_name in fiona.listlayers(drainage_network_gdb):
-        if town_name in layer_name:
-            if 'pts' in layer_name:
-                town_drainage_pts_layer = layer_name
-
-    town_drainage_pts = gpd.read_file(drainage_network_gdb, layer=town_drainage_pts_layer)
-    town_drainage_pts = town_drainage_pts.explode().reset_index(drop=True)
-
-    drainage_pts = calculate_suitability_criteria(how='distance', 
-                                                    id_field='parloc_id',
-                                                    parcel_data=town_parcels_row, 
-                                                    join_data=town_drainage_pts,
-                                                    layer_name='drn_pts')
+    drainage = drainage_data(town_name=town_name, 
+                            id_field='parloc_id', 
+                            parcel_data=town_parcels_row)
 
     #how is soil quality?
 
@@ -279,9 +252,8 @@ def parcel_ms4_model(town_name, processed_path):
         ej,
         comm_vis,
         soils,
-        drainage_lines,
-        drainage_pts
-        ]
+        drainage        
+    ]
 
     #merge all of the listed dataframes together based on their parcel id and geometry
     df_merged = reduce(lambda  left,right: pd.merge(left,

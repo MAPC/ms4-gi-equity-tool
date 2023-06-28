@@ -32,7 +32,7 @@ from src.features.build_features import *
 
 #from src.data.make_dataset import *
 
-def get_parcels_row(town_name, mapc_lpd, muni_shp):
+def get_parcels_row(town_name, mapc_lpd, muni_gdf):
 
     '''
     describe
@@ -40,12 +40,11 @@ def get_parcels_row(town_name, mapc_lpd, muni_shp):
 
     row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\ROW_model_output.gdb'
 
-    for layer_name in fiona.listlayers(row_gdb):
-        if town_name in layer_name:
-            town_row_layer = layer_name
-
-    town_row = gpd.read_file(row_gdb, layer=town_row_layer)
+    #read in region-wide row segments, clip to municipal boundary
+    town_row = gpd.read_file(row_gdb, layer='ROW_segmentation_MAPC', mask=muni_gdf)
+    town_row = town_row.clip(muni_gdf)
     town_row = town_row.explode().reset_index(drop=True)
+    town_row = town_row.loc[town_row['geometry'].geom_type == 'Polygon']
 
 
     #prepare parcel layer wtih parcels and row segments
@@ -55,7 +54,6 @@ def get_parcels_row(town_name, mapc_lpd, muni_shp):
 
     town_parcels = town_parcels.overlay(town_row, how='difference')
     #set up row layer
-
 
     #don't need most field names
     town_row = town_row[['poly_typ','geometry']]
@@ -74,7 +72,7 @@ def get_parcels_row(town_name, mapc_lpd, muni_shp):
 
     #join row segments to road EOT layer to get street name in address field
     row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\RightOfWay_Segmentation.gdb'
-    eot_road_mapc = gpd.read_file(row_gdb, layer='EOTROADS_MAPC', mask=muni_shp)
+    eot_road_mapc = gpd.read_file(row_gdb, layer='EOTROADS_MAPC', mask=muni_gdf)
     eot_road_mapc = eot_road_mapc.to_crs(town_parcels.crs)
 
     town_row = town_row.sjoin(eot_road_mapc, how="left")
@@ -455,9 +453,11 @@ def comm_vis_layer(id_field, parcel_data, town_center_data,comm_vis_data):
     choices = [1, 0]
 
     comm_assets['comm'] = np.select(comm_rule, choices, default=np.nan)
-    comm_assets = comm_assets.rename(columns = {"NAME": "comm_name", "TYPE": "comm_type"})
+    comm_assets = comm_assets.rename(columns = {"NAME": "comm_name", 
+                                                "TYPE": "comm_type"})
 
-
+    comm_assets['comm_name'] = np.where(comm_assets['comm']== 1, comm_assets['comm_name'], np.nan)
+    comm_assets['comm_type'] = np.where(comm_assets['comm']== 1, comm_assets['comm_type'], np.nan)
     comm_vis = towncenter.merge(comm_assets, on=[id_field, 'geometry'], how='inner')
 
     comm_vis_rule = [
@@ -470,3 +470,49 @@ def comm_vis_layer(id_field, parcel_data, town_center_data,comm_vis_data):
     comm_vis['commvis'] = np.select(comm_vis_rule, choices, default=np.nan)
     
     return comm_vis
+
+def drainage_data(town_name, id_field, parcel_data):
+    #first identify the drainage network - let's just do lines for now.
+    drainage_network_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\Drainage_network.gdb'
+
+    if any(town_name in s for s in fiona.listlayers(drainage_network_gdb)):
+        for layer_name in fiona.listlayers(drainage_network_gdb):
+            if town_name in layer_name:
+                if 'lines' in layer_name:
+                    town_drainage_lines_layer = layer_name
+
+        town_drainage_lines = gpd.read_file(drainage_network_gdb, layer=town_drainage_lines_layer)
+        town_drainage_lines = town_drainage_lines.explode().reset_index(drop=True)
+
+        drainage_lines = calculate_suitability_criteria(how='distance', 
+                                                        id_field=id_field,
+                                                        parcel_data=parcel_data, 
+                                                        join_data=town_drainage_lines,
+                                                        layer_name='drn_ln')
+
+        #how close is it to the nearest catch basin?
+        for layer_name in fiona.listlayers(drainage_network_gdb):
+            if town_name in layer_name:
+                if 'pts' in layer_name:
+                    town_drainage_pts_layer = layer_name
+
+        town_drainage_pts = gpd.read_file(drainage_network_gdb, layer=town_drainage_pts_layer)
+        town_drainage_pts = town_drainage_pts.explode().reset_index(drop=True)
+
+        drainage_pts = calculate_suitability_criteria(how='distance', 
+                                                    id_field=id_field,
+                                                    parcel_data=parcel_data, 
+                                                    join_data=town_drainage_pts,
+                                                    layer_name='drn_pts')
+    else:
+        drainage_lines = parcel_data[[id_field, 'geometry']].copy()
+        drainage_lines['dst_drn_ln'] = -999
+        drainage_lines['nrm_drn_ln'] = -999
+        drainage_pts = parcel_data[[id_field, 'geometry']].copy()
+        drainage_pts['dst_drn_pt'] = -999
+        drainage_pts['nrm_drn_pt'] = -999
+
+    drainage = drainage_lines.merge(drainage_pts, on=[id_field, 'geometry'], how='inner')
+    drainage.insert((len(drainage.columns) - 1), 'geometry', drainage.pop('geometry'))
+
+    return drainage
