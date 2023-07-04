@@ -28,18 +28,19 @@ from rasterio.enums import MergeAlg
 from sklearn.preprocessing import MinMaxScaler
 #from src.data.make_dataset import *
 
-def get_landuse_data(muni, mapc_lpd):
+def get_landuse_data(muni):
     '''
     input = muni name
-    output = picks out the right shapefile from the state's municipal land use database;
-             makes a subdirectory in intermediate folder w town name and exports land use shapefile to it
-             reads that shapefile in as a geodataframe
+    output = - picks out the right shapefile from the state's municipal land use database (for 3a);
+             - makes a subdirectory in seciton 3a parcels folder w town name and exports land use shapefile to it
+             - reads that shapefile in as a geodataframe
 
     '''
-    intermediate_path = "K:\\DataServices\\Projects\\Current_Projects\\Housing\\Section_3A\\Analytical_Toolbox\\Data\\Intermediate"
 
-    path = os.path.join(intermediate_path, muni)
 
+    from src.data.make_dataset import section3a_parcels_path
+
+    path = os.path.join(section3a_parcels_path, muni)
 
     #set land  use variable
     town_lu_path = ""
@@ -50,28 +51,7 @@ def get_landuse_data(muni, mapc_lpd):
 
     muni_state_parcels = gpd.read_file(town_lu_path).rename(columns={'LOC_ID': 'parloc_id'})
     
-    muni_lpd_preprocess = muni_state_parcels.merge(mapc_lpd, on='parloc_id', how='left')
-
-    #unconstrained land area
-
-    #create a non-excluded land field, convert to acres 
-    muni_lpd_preprocess['non_exc'] = (muni_lpd_preprocess['SQFT'] - muni_lpd_preprocess['Tot_Exclud']) / 43560
-    
-    #total amount of excluded acres
-    muni_lpd_preprocess['exc_acres'] = muni_lpd_preprocess['Tot_Exclud'] / 43560
-
-    #total land are in acres
-    muni_lpd_preprocess['acreage'] = muni_lpd_preprocess['SQFT'] / 43560
-
-    #total amount of developable land
-    muni_lpd_preprocess['developable_land'] = muni_lpd_preprocess['acreage'] - muni_lpd_preprocess['exc_acres']
-    
-    #percent of land area that is not excluded
-    muni_lpd_preprocess['pct_developable'] = 1 - (muni_lpd_preprocess['exc_acres'] / muni_lpd_preprocess['acreage'])
-
-    #muni_lpd_preprocess = muni_lpd_preprocess.rename(columns={'LOC_ID': 'parloc_id'})
-
-    return(muni_lpd_preprocess)  
+    return(muni_state_parcels)  
     
 
 def rasterize_geom(vector, value_field, raster):
@@ -81,6 +61,7 @@ def rasterize_geom(vector, value_field, raster):
     #vector = lclu
     #value_field = 'COVERCODE'
     #raster = clipped
+
     geom_value = ((geom,value) for geom, value in zip(vector.geometry, vector[value_field]))
     
     rasterized_geom = features.rasterize(geom_value,

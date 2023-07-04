@@ -1,5 +1,12 @@
 '''
-describe
+March to June 2023 
+creator: rbowers
+
+In support of the MS4 Equitable Green Infrastructure Site Selection Tool, this suitability model processes
+statewide and local data to provide information about key characteristics related to green infrastructure. 
+
+Geography: parcels and right of way segments
+
 '''
 
 
@@ -32,6 +39,7 @@ from collections import defaultdict
 from pathlib import Path
 import fiona
 from shapely.validation import make_valid
+from datetime import datetime
 
 
 from src.features.build_features import *
@@ -44,38 +52,45 @@ pd.set_option('display.max_columns', None)
 
 def parcel_ms4_model(town_name, processed_path):
     '''
-    
-    description
+    Parcel- and right-of-way based model that outputs information about various
+    criteria related to equity other key characteristics for siting green infrastructure.
+ 
+    Inputs:
+    Town_name: string-based
+    Processed_path: output path for where shapefile should be exported
+
+    Output:
+    Shapefile of parcels and right of way segments with fields for each tool criteria element.
 
     '''
-    print('Starting on ' + town_name + '...')
 
-    #create shapefile for muni
+    #starttime message
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print('Starting on ' + town_name + ' at ' + now + '...')
+
+    #create geodataframe for muni boundary, used as input for several functions
     muni_shp = munis.loc[munis['municipal'] == town_name]
 
-    ## PARCELS ##
-    print('Prepping parcel data...')
-    town_parcels_row = get_parcels_row(town_name, mapc_lpd, muni_shp)
-
-    #create an imperviousness layer
+    ## PARCELS ## 
+    town_parcels_row = get_parcels_row(town_name, muni_shp) #from src.features.ms4_funcs.py
 
     ## LAND COVER DATA PREP ##
-    print('Prepping land cover data...')
 
     #first read in lclu with a muni shapefile mask
-    lclu_muni = get_lclu_muni(muni_shp)
+    lclu_muni = get_lclu_muni(muni_shp) #from src.features.ms4_funcs.py 
 
-    #then get tree canopy only
-    lclu_treecanopy = get_tree_canopy_lc(lclu_muni)
+    #then get land cover for tree canopy only
+    lclu_treecanopy = get_tree_canopy_lc(lclu_muni) #from src.features.ms4_funcs.py 
 
-    #then calculate imperviousness 
-    #select only for imperviousness land cover codes and fix gemoetry issues
+    # IMPERVIOUSNESS # 
+
+    '''   
+    #select only imperviousness land cover codes and fix gemoetry issues
     lclu_impervious = lclu_muni.loc[lclu_muni['covercode'] == 2]
     lclu_impervious.geometry = lclu_impervious.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
 
     #read in structures for the muni
-    building_structures_gdb = 'K:\\DataServices\\Datasets\\MassGIS\\Facilities_Structures\\Building_Structures\\Output\\structures.gdb'
-    building_structures = gpd.read_file(building_structures_gdb, layer='STRUCTURES_POLY', mask=muni_shp)
+    building_structures = gpd.read_file(building_structures_gdb, layer=building_structures_layer, mask=muni_shp)
 
     #add a type field
     building_structures['type'] = 'rooftop'
@@ -86,25 +101,29 @@ def parcel_ms4_model(town_name, processed_path):
 
     #add a type field
     imperv_cover['type'] = 'land cover'    
+    '''
 
+    ## SUITABILITY MODEL ##
 
-    print('Calculating parcel score for each criteria...')
-    #does it have a public land use?
+    #does it have a public land use? or a public owner signal?
+
+    from src.data.public_uses import public_land_uses, owner_types
+
     town_parcels_row['pblc'] = town_parcels_row['UseDesc'].apply(lambda x: 1 if x in public_land_uses else 0).astype(int)
-
+    town_parcels_row['pblc'] = town_parcels_row['Owner'].str.contains('|'.join(owner_types), na=False).astype(int)
 
     #how much imperviousness is on site?
     imperv = calculate_imperviousness(town_parcels_row, 
                                     'parloc_id', 
-                                    imperv_cover, 
-                                    building_structures)
+                                    lclu_muni, 
+                                    muni_shp)
     
     #what is the imperviousness pler on site?
-    imperv_pler = get_K_load(parcel_data=town_parcels_row,
+    imperv_pler = get_P_load(parcel_data=town_parcels_row,
                             id_field = 'parloc_id',
                             muni_name = town_name,
-                            muni_shpf = muni_shp,
-                            lclu_layer=lclu_impervious,
+                            muni_gdf = muni_shp,
+                            lclu_layer=lclu_muni,
                             pler_field='pler')
 
 
@@ -151,6 +170,7 @@ def parcel_ms4_model(town_name, processed_path):
                                                 field='SUPPLIER',
                                                 layer_name='int_wpa',
                                                 overlap=0.05)
+    
     #does it have an activity use limitation area within it?
     aul_ovlp = calculate_suitability_criteria(how='if_overlap', 
                                                 id_field='parloc_id',
@@ -224,7 +244,7 @@ def parcel_ms4_model(town_name, processed_path):
     #get soil hydrology score
     muni_soils_hsg = soil_hsg_score(muni_shp)
 
-    #then calculate
+    #then calculate the mean soil hydrology score across the parcel
     soils = calculate_suitability_criteria(how='overlap_sjoin', 
                                             id_field='parloc_id',
                                             parcel_data=town_parcels_row, 
@@ -234,10 +254,16 @@ def parcel_ms4_model(town_name, processed_path):
                                             layer_name='soils',
                                             overlap=0.05)
 
-    print('Building and exporting combined data table...')
 
-    dfs = [town_parcels_row[['parloc_id', 'Address', 'Owner', 'UseDesc', 'muni', 'type', 'acreage', 'pblc', 'geometry']], 
-        #public,
+    dfs = [town_parcels_row[['parloc_id', 
+                             'Address', 
+                             'Owner', 
+                             'UseDesc', 
+                             'muni', 
+                             'type', 
+                             'acreage', 
+                             'pblc', 
+                             'geometry']], 
         imperv,
         imperv_pler,
         parkserve,

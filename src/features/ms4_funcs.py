@@ -32,36 +32,77 @@ from src.features.build_features import *
 
 #from src.data.make_dataset import *
 
-def get_parcels_row(town_name, mapc_lpd, muni_gdf):
+def get_parcels_row(town_name, muni_gdf):
 
     '''
-    describe
+    Creates base geometry for MS4 model. 
+
+    INPUTS:
+    town_name: string
+    muni_gdf: geodataframe of municipal boundary
+
+    OUTPUT:
+    one geodataframe of parcels and right of way segments with
+    unique identifiers ('parloc_id'), 'type' field that distinguishes parcels
+    from ROW segments, and acreage. 
+    
+    For ROW segments, closest intersecting street name is added in 'address' field. 
+    All fields retained for parcel data.
+
     '''
 
-    row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\ROW_model_output.gdb'
+    ## RETRIEVE PARCEL DATA ##
 
-    #read in region-wide row segments, clip to municipal boundary
-    town_row = gpd.read_file(row_gdb, layer='ROW_segmentation_MAPC', mask=muni_gdf)
+    from src.data.make_dataset import section3a_parcels_path #this is where 3a parcel data lives
+    from src.data.make_dataset import ms4_model_gdb 
+
+    muni_id = muni_gdf.iloc[0]['muni_id'].astype(int) #get muni id to make row parcel id
+
+    if town_name in os.listdir(section3a_parcels_path): #for towns in 3a list
+        #prepare parcel layer wtih parcels and row segments
+        town_parcels = get_landuse_data(town_name) #from src.features.build_features.py 
+        #add muni and type fields
+        town_parcels['muni'] = town_name 
+        town_parcels['type'] = 'parcel'
+    
+    else: #for towns not in 3a list
+        for layer_name in fiona.listlayers(ms4_model_gdb):
+            if town_name in layer_name:
+                town_parcels_layer = layer_name
+        
+        town_parcels = gpd.read_file(ms4_model_gdb, layer=town_parcels_layer)
+
+        #rename field names to match fields in 3a parcel database
+        town_parcels = town_parcels.rename(columns={'LOC_ID': 'parloc_id', 
+                                                    'USE_DESC': 'UseDesc',
+                                                    'TOWN_ID': 'muni_id',
+                                                    'OWNER1': 'Owner',
+                                                    'SITE_ADDR': 'Address'})
+        town_parcels['muni'] = town_name
+        town_parcels['type'] = 'parcel'
+        town_parcels['acreage'] = town_parcels['geometry'].area / 4047
+    
+
+    ## RIGHT OF WAY ## 
+    from src.data.make_dataset import row_output_gdb, row_segment_layer, row_segment_layer_bos, row_gdb, eot_layer
+    
+    #read in row segments, clip to municipal boundary
+    if town_name == 'Boston': 
+        print('getting row data from Boston')
+        town_row = gpd.read_file(row_output_gdb, layer=row_segment_layer_bos, mask=muni_gdf)
+    else:
+        town_row = gpd.read_file(row_output_gdb, layer=row_segment_layer, mask=muni_gdf)
+
     town_row = town_row.clip(muni_gdf)
+
+    #fix any geometry issues
     town_row = town_row.explode().reset_index(drop=True)
     town_row = town_row.loc[town_row['geometry'].geom_type == 'Polygon']
 
-
-    #prepare parcel layer wtih parcels and row segments
-    town_parcels = get_landuse_data(town_name, mapc_lpd)
-    town_parcels['muni'] = town_name
-    town_parcels['type'] = 'parcel'
-
-    town_parcels = town_parcels.overlay(town_row, how='difference')
-    #set up row layer
-
-    #don't need most field names
-    town_row = town_row[['poly_typ','geometry']]
-
     #create ID field
-    muni_id = town_parcels.iloc[2]['muni_id'].astype(int)
     town_row.insert(0, 'parloc_id', range(10000, 10000 + len(town_row)))
     town_row['parloc_id'] = muni_id.astype(str) + '_ROW_' + town_row['parloc_id'].astype(str)
+    town_row = town_row[['parloc_id', 'geometry']]
 
     #create type and muni fields that will be consistent with the parcels fields
     town_row['type'] = 'ROW segment'
@@ -71,14 +112,21 @@ def get_parcels_row(town_name, mapc_lpd, muni_gdf):
     town_row['acreage'] = town_row['geometry'].area / 4047
 
     #join row segments to road EOT layer to get street name in address field
-    row_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\RightOfWay_Segmentation.gdb'
-    eot_road_mapc = gpd.read_file(row_gdb, layer='EOTROADS_MAPC', mask=muni_gdf)
+    eot_road_mapc = gpd.read_file(row_gdb, layer=eot_layer, mask=muni_gdf) #read in eot layer
     eot_road_mapc = eot_road_mapc.to_crs(town_parcels.crs)
 
     town_row = town_row.sjoin(eot_road_mapc, how="left")
     town_row['Address'] = town_row['STREETNAME']
-    town_row = town_row[['parloc_id', 'type', 'muni', 'Owner', 'Address', 'acreage', 'geometry']].groupby(by='parloc_id').agg('first').reset_index()
+    town_row = town_row[['parloc_id', 
+                         'type', 
+                         'muni', 
+                         'Owner', 
+                         'Address', 
+                         'acreage', 
+                         'geometry']].groupby(by='parloc_id').agg('first').reset_index()
+    print(town_row.info())
 
+    town_parcels = town_parcels.overlay(town_row, how='difference')
 
     #merge together ROW parcels with parcel data from 3a - final dataset for spatial operations
     town_parcels_row = pd.concat([town_parcels, town_row]).reset_index()
@@ -88,27 +136,35 @@ def get_parcels_row(town_name, mapc_lpd, muni_gdf):
 
 def get_lclu_muni(muni_gdf):
     '''
-    describe
+    for layer with 2016 lclu and pler estimates (created in models > pler_calc.py), 
+    clips layer to municipal boundary and gives the total phosphorus load 
     '''
-    ms4_model_gdb = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
-    lclu = gpd.read_file(ms4_model_gdb, layer="lclu_simplify_all_mapc", mask=muni_gdf)
+    from src.data.make_dataset import ms4_model_gdb, lclu_layer
+    lclu = gpd.read_file(ms4_model_gdb, layer=lclu_layer, mask=muni_gdf)
 
     #fix any geometry issues
     lclu.geometry = lclu.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
+    lclu = lclu.loc[lclu['geometry'].geom_type == 'Polygon']
     lclu = lclu.clip(muni_gdf)
+    #lclu.geometry = lclu.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
     lclu = lclu.loc[lclu['geometry'].geom_type == 'Polygon']
 
     #get phosphorous load per land cover geometry area
     lclu['acres'] = lclu['geometry'].area / 4047
-    lclu['K_load'] = lclu['pler'] * lclu['acres']
+    lclu['P_load'] = lclu['pler'] * lclu['acres']
     return lclu
 
 def get_tree_canopy_lc(lclu_muni):
     '''
-    describe
+    From municipal land cover dataset, extracts tree canopy land cover types. 
+    Resulting geodataframe encompasses all area of land in 
+    municipality that is covered by tree canopy.
+
     '''
     #tree canopy using land use
-    tree_canopy_covernames = ['Deciduous Forest', 'Evergreen Forest', 'Palustrine Forested Wetland']
+    tree_canopy_covernames = ['Deciduous Forest', 
+                              'Evergreen Forest', 
+                              'Palustrine Forested Wetland']
     lclu_treecanopy = lclu_muni.loc[lclu_muni['covername'].isin(tree_canopy_covernames)]
 
     lclu_treecanopy.geometry = lclu_treecanopy.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
@@ -128,15 +184,25 @@ def tree_score(muni_boundary, muni_tree_canopy):
     then be prioritized higher.
 
     '''
+    # PREPARE BASE GEOGRAPHY (BLOCK GROUPS) #
+
     #bring in block groups from dataset script
     from src.data.make_dataset import mapc_bgs
 
+    # clip block groups to municipal boundary
+    # need to eliminate "slivers" of block groups left from clip
     mapc_bgs['og_area'] = mapc_bgs['geometry'].area
     muni_bgs = mapc_bgs.clip(muni_boundary)
     muni_bgs['pct_bg'] = ((muni_bgs['geometry'].area) / (muni_bgs['og_area'])) * 100
 
     #only keep block groups where 5% or more of the bg remains
     muni_bgs = muni_bgs.loc[muni_bgs['pct_bg'] > 5]
+
+    # TREE CANOPY COVERAGE #
+
+    #use suitability calculation: for each block group, calculates a percentage of 
+    #area that is covered by tree canopy
+
 
     muni_bgs_treecanopy = calculate_suitability_criteria(how='overlap_area', 
                                                         id_field='bg20_id',
@@ -165,10 +231,47 @@ def tree_score(muni_boundary, muni_tree_canopy):
     return muni_bgs_tree_need
 
 
-def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_structure_layer):
+def calculate_imperviousness(parcel_data, 
+                             id_field, 
+                             lclu_muni, 
+                             muni_gdf):
     '''
-    describe
+    Inputs:
+    - parcel data 
+    - id_field for parcel data
+    - lclu muni - lclu clipped to muni boundary
+    - muni_gdf - boundary 
+    - building structures in muni (pulled within function)
+
+    Output:
+    For each parcel, this function calculates:
+    - Total area of impervious cover
+    - Total area of impervious rooftop
+    - Combined area of all impervious surface
+    - Breakdown by percentage of impervious cover, rooftop, and pervious surface
+    
     '''
+    from src.data.make_dataset import building_structures_gdb, building_structures_layer
+
+    #create impervious cover layer by exracting only impervious cover code (2)
+    imprv_cover_layer = lclu_muni.loc[lclu_muni['covercode'] == 2]
+    imprv_cover_layer.geometry = imprv_cover_layer.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
+
+    #read in structures for the muni 
+    building_structures = gpd.read_file(building_structures_gdb, 
+                                        layer=building_structures_layer, 
+                                        mask=muni_gdf)
+
+    #add a type field
+    building_structures['type'] = 'rooftop'
+
+    #erase structures from the imperviousness lclu layer
+    #now we just have land cover (not rooftops) that are imperviousness
+    imperv_cover = imprv_cover_layer.overlay(building_structures, how='difference')
+
+    #add a type field
+    imperv_cover['type'] = 'land cover'  
+
     #calculate area of impervious cover
     imperv_surfaces = calculate_suitability_criteria(how='overlap_area', 
                                                 id_field=id_field,
@@ -181,7 +284,7 @@ def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_str
     imperv_rooftops = calculate_suitability_criteria(how='overlap_area', 
                                                     id_field=id_field,
                                                     parcel_data=parcel_data, 
-                                                    join_data=imprv_structure_layer, 
+                                                    join_data=building_structures, 
                                                     field='type',
                                                     layer_name='imp_rf')
     
@@ -192,7 +295,7 @@ def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_str
                                 how='outer').fillna(0)
         
 
-    
+    # use output from overlap_area and merge to create usable fields
     imperv['sqm_imprv'] = imperv['sqm_imp_cvr'] + imperv['sqm_imp_rf']
     imperv['pct_imprv'] = (imperv['sqm_imprv'] / imperv['geometry'].area) * 100
     imperv['sqm_prv'] = imperv['geometry'].area - imperv['sqm_imprv']
@@ -202,20 +305,19 @@ def calculate_imperviousness(parcel_data, id_field, imprv_cover_layer, imprv_str
     imperv['acr_imp_rf'] = imperv['sqm_imp_rf'] / 4047
     imperv['acr_prv'] = imperv['sqm_prv'] / 4047
 
+    #move geometry to end
     imperv.insert((len(imperv.columns) - 1), 'geometry', imperv.pop('geometry'))
 
     return(imperv)
 
 def heat_score (muni_boundary, heat_index_fp):
-    '''
 
-    For each block group in the municipality, determines the relative heat index score compared to all other block groups. 
-    Those in the top 40% of scores
-    are retained as having heat "vulnerability". Parcels or fishnet cells within those block groups can
-    then be prioritized higher.
+    '''
+    For each census block  in the municipality, determines the relative heat index score compared to all other block groups. 
+    Those in the top 40% of scores are retained as having heat "vulnerability". 
+    Parcels within those block groups can then be prioritized higher.
 
     Inputs: Muni boundary (gdf), heat index raster (geotiff)
-    Outputs: 
 
     '''
     from rasterstats import zonal_stats
@@ -244,9 +346,11 @@ def heat_score (muni_boundary, heat_index_fp):
     muni_blocks_heat = muni_blocks[['geoid20', 'geometry']].join(lst_stats)
     muni_blocks_heat = muni_blocks_heat.rename(columns={'mean':'lst_mean'})
 
+    #rank each block based on relative lst index score
     muni_blocks_heat['rnk_heat'] = muni_blocks_heat['lst_mean'].rank(method='min', pct=True)
     muni_blocks_heat.head()
 
+    #create a categorical ranking for where each block lands relative to one another
     heat_rule = [
                     (muni_blocks_heat['rnk_heat'] > 0.80),
                     (muni_blocks_heat['rnk_heat'] <= 0.80) & (muni_blocks_heat['rnk_heat'] > 0.60),
@@ -266,8 +370,17 @@ def heat_score (muni_boundary, heat_index_fp):
 
 
 def soil_hsg_score(muni_shapefile):
-    from src.data.make_dataset import ms4_gdb
-    soils_hsg = gpd.read_file(ms4_gdb, layer="soils_mapc_simplify", mask=muni_shapefile)
+
+    '''
+    For each SSURGO geometry in the muni, calculates a soil hydrology
+    score based on te soil hydrologic group. Soils in group A get a score of 3,
+    soils in group B get a score of 2, soils in group C, D, A/D, B/D, and C/D
+    get a score of 1. Soils without a hydrologic soil group get a score of 0.
+
+    '''
+
+    from src.data.make_dataset import ms4_gdb, soils_layer
+    soils_hsg = gpd.read_file(ms4_gdb, layer=soils_layer, mask=muni_shapefile)
 
     soil_hsg_rule = [
         soils_hsg['HYDROLGRP'] == 'A',
@@ -287,15 +400,20 @@ def soil_hsg_score(muni_shapefile):
     return soils_hsg
 
 
-def get_K_load (parcel_data, 
+def get_P_load (parcel_data, 
                 id_field,
                 muni_name,
-                muni_shpf,
+                muni_gdf,
                 lclu_layer, 
                 pler_field:str):
 
     '''
-    describe here
+    For each parcel, calculates phosphorous load using raster stats.
+
+    Inputs:
+    - Parcel data for muni + id field 
+    - Name of muni (for naming clipped raster)
+    - 
 
     '''
 
@@ -310,9 +428,9 @@ def get_K_load (parcel_data,
     with rasterio.open(inRas) as src:
         #update crs
         src.meta.update({
-            'crs': muni_shpf.crs
+            'crs': muni_gdf.crs
             })
-        out_image, out_transform= mask(src,muni_shpf.geometry,crop=True)
+        out_image, out_transform= mask(src,muni_gdf.geometry,crop=True)
         out_meta=src.meta.copy() # copy the metadata of the source DEM
 
         
@@ -328,7 +446,9 @@ def get_K_load (parcel_data,
         dst.write(out_image)
 
     #need to transform pler into a raster otherwise this takes a really long time
-    vector = lclu_layer
+
+    vector = lclu_layer[lclu_layer['covercode'] == 2]
+    
     geom = [shapes for shapes in vector.geometry]
     geom_value = ((geom,value) for geom, value in zip(vector.geometry, vector[pler_field]))
 
@@ -351,67 +471,31 @@ def get_K_load (parcel_data,
                                                 stats='sum'))
 
     parcel_pler_stats = parcel_data[[id_field, 'geometry']].join(pler_stats)
-    parcel_pler_stats = parcel_pler_stats.rename(columns={'sum':'K_sum'})
-    parcel_pler_stats['K_per_acre'] = parcel_pler_stats['K_sum'] / (parcel_pler_stats['geometry'].area / 4047)
+    parcel_pler_stats = parcel_pler_stats.rename(columns={'sum':'P_sum'})
+    parcel_pler_stats['P_per_acre'] = parcel_pler_stats['P_sum'] / (parcel_pler_stats['geometry'].area / 4047)
 
     os.remove(outRas)
 
     return parcel_pler_stats
 
 
-public_land_uses = ['Vacant, Selectmen or City Council, Other City or Town (Municipal)',
-    'Vacant, Selectmen or City Council (Municipal)',
-    'Vacant, Conservation (Municipal or County)',
-    'Improved, Selectmen or City Council (Municipal)',
-    'Vacant, District (County)', 'United States Government',
-    'Vacant, Education (Municipal or County)',
-    'Improved, Education (Municipal or County)',
-    'Improved, Other District (County)',
-    'Vacant, Other District (County)',
-    'Dept. of Conservation and Recreation (DCR) - Division of Water Supply Protection, Urban Parks (non-reimbursable)',
-    'Mass. Highway Dept. (MHD) (non-reimbursable)',
-    'Dept. of Conservation and Recreation (DCR) - Division of Urban Parks and Recreation (non-reimbursable)',
-    'EXEMPT', 
-    'Transportation Authority',
-    'Improved, Municipal Public Safety', 'Improved, District (County)',
-    'Dept. of Conservation and Recreation (DCR), Division of State Parks and Recreation',
-    '(formerly Municipalities/Districts.  Removed June 2009.)',
-    'Mass. Highway Dept. (MHD) (non-reimbursable), Gasoline Service Stations - providing engine repair or maintenance services, and fuel products',
-    'Dept. of Fish and Game, Environmental Law Enforcement (DFG, formerly DFWELE) (non-reimbursable)',
-    'Vacant, Selectmen or City Council (Municipal), Cemeteries (Charitable Org.)',
-    'Recreation, Active Use (Charitable Org.)',
-    'Improved, Selectmen or City Council, Other City or Town (Municipal)',
-    'Non Profit Industrial', 
-    'SEWER DEPT', 
-    'UNKNOWN OWNER V',
-    'municipal, Other Motor Vehicles Sales and Services',
-    'TOWN-PROP  MDL-00',
-    'Vacant, Conservation (Municipal or County), UNKNOWN OWNER V',
-    'IMPUTED - Transportation Authority',
-    'Vacant Land, UNKNOWN OWNER V',
-    "Dept. of Corrections (DOC) - Division of Youth Services,Mass. Military,State Police,Sheriffs' Depts. (non-reimbursable)",
-    'Utility Authority - Electric, Light, Sewer, Water',
-    'Military Division - Campgrounds',
-    'Comm. Of Mass. (Other, non-reimbursable)',
-    'Developable Residential Land, (formerly Municipalities/Districts.  Removed June 2009.)',
-    '(formerly Commonwealth of Massachusetts.  Removed June 2009.)',
-    '(formerly Municipalities/Districts.  Removed June 2009.), Condo-Off',
-    '(formerly Commonwealth of Massachusetts.  Removed June 2009.), Residential Condominium',
-    'Single Family Residential, (formerly Municipalities/Districts.  Removed June 2009.)',
-    'Condo-Off, (formerly Municipalities/Districts.  Removed June 2009.)',
-    #added additional uses
-    'Town Property Improved',
-    'Bus Transportation Facilities and Related Properties',
-    'IMPUTED - Housing Authority',
-    'Housing Authority',
-    'Vacant, Housing Authority',
-    'Improved, Tax Title/Treasurer',
-    'Vacant, Tax Title/Treasurer'
-    ]
 
-def comm_vis_layer(id_field, parcel_data, town_center_data,comm_vis_data):
+def comm_vis_layer(id_field, 
+                   parcel_data, 
+                   town_center_data,
+                   comm_vis_data):
 
     '''
+    For each parcel, calculates:
+    - Whether or not the parcel is within a 'town center'
+    - Calculates distance from nearest "visibile" community location 
+    - If within threshold distance, provides information about what the nearest location is 
+
+    Inputs:
+    - Parcel data with ID field identified
+    - Town center layer
+    - Community visibility points layer (generated from src > features > ms4-comm-vis.R)
+    
     define this and add comments but this is the community visibility layer!
     inputs
     outputs
@@ -473,9 +557,11 @@ def comm_vis_layer(id_field, parcel_data, town_center_data,comm_vis_data):
 
 def drainage_data(town_name, id_field, parcel_data):
     #first identify the drainage network - let's just do lines for now.
-    drainage_network_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\Drainage_network.gdb'
+    from src.data.make_dataset import drainage_network_gdb
 
     if any(town_name in s for s in fiona.listlayers(drainage_network_gdb)):
+        #if town name is in the drainage network geodatabase, then run the following script to produce distance data
+        #otherwise fill with -999 (see 'else')
         for layer_name in fiona.listlayers(drainage_network_gdb):
             if town_name in layer_name:
                 if 'lines' in layer_name:
@@ -489,6 +575,7 @@ def drainage_data(town_name, id_field, parcel_data):
                                                         parcel_data=parcel_data, 
                                                         join_data=town_drainage_lines,
                                                         layer_name='drn_ln')
+    
 
         #how close is it to the nearest catch basin?
         for layer_name in fiona.listlayers(drainage_network_gdb):
