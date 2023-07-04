@@ -74,55 +74,6 @@ def rasterize_geom(vector, value_field, raster):
     
     return rasterized_geom
 
-def overlap_sjoin_hold (target_layer, 
-                   overlap_layer, 
-                   field:str, 
-                   stats=None):
-
-
-    '''
-    assigns the parcel with the (max, min, average, exact) value from an overlapping geography that may have multiple values overlapping the parcel.
-    Best suited for an overlapping geography that may have multiple values within the parcel.
-
-    inputs: 
-    - target_layer = parcel database that you are joining overlap layer with (can be pre-filtered for muni of interest for speed)
-    - overlap_layer = the layer you are interested in getting the overlap (ie, transit buffer, flood zone, etc)
-    - field (str) = which field you want to do statistics for overlap 
-    - layer_name = name for the indicator
-    - stats (str) = {'first', 'last', 'sum', 'mean', 'median', 'max', 'min', 'std', 'var', 'count', 'size'}. Default is none. 
-
-    '''
-    #from pylusat import geotools
-    from src.features.sjoin_update import spatial_join
-
-    if stats is None:
-        stats = 'mean'
-    else:
-        stats = stats
-
-
-    #valid = {'first', 'last', 'sum', 'mean', 'median', 'max', 'min', 'std', 'var', 'count', 'size'}
-    #if stats not in valid:
-    #    raise ValueError("stats must be one of %r." % valid)
-        
-
-    #reproject all to mass mainland
-    mass_mainland_crs = "EPSG:26986"
-    target_layer = target_layer.to_crs(mass_mainland_crs)
-    overlap_layer = overlap_layer.to_crs(mass_mainland_crs)
-
-    #only keep parts of overlap layer that intersects with parcels. using pylusat methodology but udpated
-    overlap_geo_overlay = spatial_join(target_layer, 
-                                        overlap_layer, 
-                                        op='intersects', 
-                                        cols_agg={field: [stats]},   
-                                        join_type='one to one', 
-                                        keep_all=True)
-   
-    
-
-    return overlap_geo_overlay
-
 
 
 def scaling(df, col:str):
@@ -325,7 +276,8 @@ def distance_with_fields (parcel_data,
                             layer_name:str):
 
     '''
-    caclulates the distance from parcel boundaries to the nearest boundary of distance_layer
+    caclulates the distance from parcel boundaries to the nearest boundary of distance_layer and retains
+    a chosen list of fields
 
     inputs: 
     - parcel_data = parcel database that you are joining overlap layer with (can be pre-filtered for muni of interest for speed)
@@ -336,7 +288,6 @@ def distance_with_fields (parcel_data,
     - distance field (meters)) for distance in meters from parcel boundary to nearest distance_layer boundary
     - desired information about nearest distance_layer geometry
 
-    from nearest distance_layer feature
 
     same as "near" in ArcGIS Pro https://pro.arcgis.com/en/pro-app/latest/tool-reference/analysis/near.htm
 

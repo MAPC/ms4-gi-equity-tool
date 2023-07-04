@@ -34,7 +34,7 @@ import fiona
 from shapely.validation import make_valid
 
 
-from src.features.build_features import *
+from src.features.suitability_criteria import *
 from src.data.make_dataset import *
 from src.features.ms4_funcs import *
 

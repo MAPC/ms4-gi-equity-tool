@@ -15,6 +15,15 @@ ms4_model_gdb = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\
 lclu_layer = "lclu_simplify_all_mapc"
 soils_layer = "soils_mapc_simplify"
 
+#what field in lclu defines the phosphorus estimate?
+pler_field = 'pler'
+
+#what is the field that defines the hydrologic soil group?
+hsg_field = 'HYDROLGRP'
+
+#from lclu, what are the tree canopy cover names
+tree_canopy_covernames = ['Deciduous Forest', 'Evergreen Forest', 'Palustrine Forested Wetland']
+
 #right of way segments. these are derived from models > row_segmentation.py 
 row_output_gdb = 'K:\DataServices\Projects\Current_Projects\Environment\MS4\Project\ROW_model_output.gdb'
 row_segment_layer = 'ROW_segmentation_MAPC'
@@ -42,20 +51,19 @@ section3a_parcels_path = "K:\\DataServices\\Projects\\Current_Projects\\Housing\
 
 print('Reading in additional data layers...')
 print('Wetlands...')
+
 #wetlands 
 wetlands_fp = 'K:\\DataServices\\Datasets\\MassGIS\\Wetlands\\WETLANDSDEP_POLY.shp'
 wetlands = gpd.read_file(wetlands_fp)
 wetlands = wetlands.loc[wetlands['IT_VALDESC'] != 'OPEN WATER']
-#add the clipping info at some point
+wetlands_field = 'IT_VALDESC'
 
 print('Watersheds...')
-#watersheds
-major_basins_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Watersheds\\MAJBAS_POLY.shp'
-major_basins = gpd.read_file(major_basins_fp)
 
-#this is the one ultimately used in the model
-subbasins_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Watersheds\\NRCSHUC10_POLY.shp'
-subbasins = gpd.read_file(subbasins_fp)
+#watershed
+watersheds_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\Watersheds\\NRCSHUC10_POLY.shp'
+watersheds = gpd.read_file(watersheds_fp)
+watersheds_field = 'HU_10_NAME'
 
 print('Wellhead protection areas...')
 #wellhead protection areas
@@ -67,15 +75,21 @@ interim_wpa = gpd.read_file(interim_wpa_fp)
 zone1_wpa = gpd.read_file(zone1_wpa_fp)
 zone2_wpa = gpd.read_file(zone2_wpa_fp)
 
+zone1_wpa_field = 'SUPPLIER'
+zone2_wpa_field = 'SUPPLIER'
+int_wpa_field = 'SUPPLIER'
+
 print('Activity use limitation areas...')
 #activity use limitation areas
 aul_fp = 'K:\\DataServices\\Datasets\\Environment and Energy\\AUL\\AUL_PT.shp'
 aul = gpd.read_file(aul_fp)
+aul_field = 'NAME'
 
 print('ParkServe data...')
 #park serve priority areas data (this data is from 2022)
 parkserve_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
 parkserve_data = gpd.read_file(parkserve_fp, layer='TPL_parkserve_clip_mapc')
+parkserve_field = 'ParkRank'
 
 #do a tree need assessment
 mapc_bgs_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Environment\\MS4\\Project\\MS4_Model.gdb'
@@ -86,6 +100,7 @@ mapc_blocks = gpd.read_file(mapc_blocks_fp, layer='mapc_2020_blocks')
 
 #environmental justice (2020 boundaries, updated in 2023)
 ej_2020 = gpd.read_file(ms4_model_gdb, layer='ej_2020_bg_mapc')
+ej_field = 'EJ_CRIT_DESC'
 
 #urban heat island index
 heat_fp = 'K:\\DataServices\\Projects\\Current_Projects\\Climate_Change\\MVP_MMC_Heat_MVP\\00 Task 2 Deliverables\\2.1 Attachments\\00 Uploaded to Sharepoint\\Shapefile_LSTIndex\\LSTindex.tif'

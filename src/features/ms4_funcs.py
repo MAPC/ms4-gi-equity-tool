@@ -28,7 +28,7 @@ from rasterio import features
 from rasterio.enums import MergeAlg
 from sklearn.preprocessing import MinMaxScaler
 from shapely.validation import make_valid
-from src.features.build_features import *
+from src.features.suitability_criteria import *
 
 #from src.data.make_dataset import *
 
@@ -92,7 +92,7 @@ def get_parcels_row(town_name, muni_gdf):
         town_row = gpd.read_file(row_output_gdb, layer=row_segment_layer_bos, mask=muni_gdf)
     else:
         town_row = gpd.read_file(row_output_gdb, layer=row_segment_layer, mask=muni_gdf)
-
+        town_row = town_row.drop(columns = 'parloc_id') #drop parlocid so you can recreate next
     town_row = town_row.clip(muni_gdf)
 
     #fix any geometry issues
@@ -121,10 +121,10 @@ def get_parcels_row(town_name, muni_gdf):
                          'type', 
                          'muni', 
                          'Owner', 
+                         'UseDesc',
                          'Address', 
                          'acreage', 
                          'geometry']].groupby(by='parloc_id').agg('first').reset_index()
-    print(town_row.info())
 
     town_parcels = town_parcels.overlay(town_row, how='difference')
 
@@ -162,9 +162,9 @@ def get_tree_canopy_lc(lclu_muni):
 
     '''
     #tree canopy using land use
-    tree_canopy_covernames = ['Deciduous Forest', 
-                              'Evergreen Forest', 
-                              'Palustrine Forested Wetland']
+    
+    from src.data.make_dataset import tree_canopy_covernames
+
     lclu_treecanopy = lclu_muni.loc[lclu_muni['covername'].isin(tree_canopy_covernames)]
 
     lclu_treecanopy.geometry = lclu_treecanopy.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
@@ -243,8 +243,7 @@ def calculate_imperviousness(parcel_data,
     - muni_gdf - boundary 
     - building structures in muni (pulled within function)
 
-    Output:
-    For each parcel, this function calculates:
+    Output - for each parcel, this function calculates:
     - Total area of impervious cover
     - Total area of impervious rooftop
     - Combined area of all impervious surface
@@ -379,18 +378,19 @@ def soil_hsg_score(muni_shapefile):
 
     '''
 
-    from src.data.make_dataset import ms4_gdb, soils_layer
+    from src.data.make_dataset import ms4_gdb, soils_layer, hsg_field
+
     soils_hsg = gpd.read_file(ms4_gdb, layer=soils_layer, mask=muni_shapefile)
 
     soil_hsg_rule = [
-        soils_hsg['HYDROLGRP'] == 'A',
-        soils_hsg['HYDROLGRP'] == 'B',
-        ((soils_hsg['HYDROLGRP'] == 'C') | 
-        (soils_hsg['HYDROLGRP'] == 'D') | 
-        (soils_hsg['HYDROLGRP'] == 'A/D') |
-        (soils_hsg['HYDROLGRP'] == 'B/D') | 
-        (soils_hsg['HYDROLGRP'] == 'C/D')),
-        soils_hsg['HYDROLGRP'] == ' '
+        soils_hsg[hsg_field] == 'A',
+        soils_hsg[hsg_field] == 'B',
+        ((soils_hsg[hsg_field] == 'C') | 
+        (soils_hsg[hsg_field] == 'D') | 
+        (soils_hsg[hsg_field] == 'A/D') |
+        (soils_hsg[hsg_field] == 'B/D') | 
+        (soils_hsg[hsg_field] == 'C/D')),
+        soils_hsg[hsg_field] == ' '
     ]
 
     choices = [3, 2, 1, 0]
@@ -404,8 +404,7 @@ def get_P_load (parcel_data,
                 id_field,
                 muni_name,
                 muni_gdf,
-                lclu_layer, 
-                pler_field:str):
+                lclu_layer):
 
     '''
     For each parcel, calculates phosphorous load using raster stats.
@@ -413,11 +412,17 @@ def get_P_load (parcel_data,
     Inputs:
     - Parcel data for muni + id field 
     - Name of muni (for naming clipped raster)
-    - 
+    
+    Output: Input parcel data with id, geometry, and new fields:
+    - P_per_acre - total Phosphorus load per acre of land on site
+    - P_sum - total Phosphorus load on site
+
+    Note that currently this is set to only calculate P load for impervious surfaces on site
 
     '''
 
     from rasterio.mask import mask
+    from src.data.make_dataset import pler_field
     
 
     inRas = 'I:\\Elevation\\Lidar\\2023_MassGIS\\LiDAR_DEM_INT_16bit.tiff'
@@ -446,7 +451,6 @@ def get_P_load (parcel_data,
         dst.write(out_image)
 
     #need to transform pler into a raster otherwise this takes a really long time
-
     vector = lclu_layer[lclu_layer['covercode'] == 2]
     
     geom = [shapes for shapes in vector.geometry]
@@ -496,9 +500,11 @@ def comm_vis_layer(id_field,
     - Town center layer
     - Community visibility points layer (generated from src > features > ms4-comm-vis.R)
     
-    define this and add comments but this is the community visibility layer!
-    inputs
-    outputs
+    Output - Parcel data with additional fields:
+    - 'twncntr' - whether or not  (1, 0) site is within town center
+    - 'comm' - whether or not (1,0) site is within 100 m from community asset
+    - 'comm_name' and 'comm_type' - where 'comm' == 1, info about mearest community site
+    - 'comm_viz' - whether or not (1,0) site is either within a town center OR within 100 m from community asset
 
     ''' 
 
@@ -509,41 +515,45 @@ def comm_vis_layer(id_field,
                                                 parcel_data=parcel_data, 
                                                 join_data=town_center_data, 
                                                 layer_name='twncntr')
-
+    
+    # create field for whether or not site is within town center (distance = 0) 
     towncenter_rule = [
                 towncenter['dst_twncntr'] == 0,
                 towncenter['dst_twncntr'] != 0
                 ]
-
     choices = [1, 0]
-
     towncenter['twncntr'] = np.select(towncenter_rule, choices, default=np.nan)
 
-
+    # define fields to retain in distance calculation
     comm_fields = ['NAME', 'TYPE']
 
+    #calculate distance to nearest comm viz point, retain listed points
     comm_assets =  distance_with_fields (parcel_data = parcel_data, 
                                         id_field = id_field, 
                                         fields = comm_fields,
                                         distance_layer = comm_vis_data, 
                                         layer_name='comm')
+    
+    #determine threshold distance - currently set at 100m
+    threshold_distance = 100
 
-
+    # create field for whether site is within threshold distance from nearest comm. site
     comm_rule = [
-                comm_assets['dst_comm'] <= 100,
-                comm_assets['dst_comm'] > 100
+                comm_assets['dst_comm'] <= threshold_distance,
+                comm_assets['dst_comm'] > threshold_distance
                 ]
 
     choices = [1, 0]
-
     comm_assets['comm'] = np.select(comm_rule, choices, default=np.nan)
     comm_assets = comm_assets.rename(columns = {"NAME": "comm_name", 
-                                                "TYPE": "comm_type"})
+                                                "TYPE": "comm_type"}) #rename 
 
+    # if within 100 m, retain name and type. otherwise leave null
     comm_assets['comm_name'] = np.where(comm_assets['comm']== 1, comm_assets['comm_name'], np.nan)
     comm_assets['comm_type'] = np.where(comm_assets['comm']== 1, comm_assets['comm_type'], np.nan)
     comm_vis = towncenter.merge(comm_assets, on=[id_field, 'geometry'], how='inner')
 
+    # create a field for whether site is within town center OR within threshold distance from comm. site
     comm_vis_rule = [
         ((comm_vis['twncntr'] == 1) | (comm_vis['comm'] == 1)),
         ((comm_vis['twncntr'] != 1) & (comm_vis['comm'] != 1))
@@ -555,21 +565,43 @@ def comm_vis_layer(id_field,
     
     return comm_vis
 
-def drainage_data(town_name, id_field, parcel_data):
-    #first identify the drainage network - let's just do lines for now.
+def drainage_data(town_name, 
+                  id_field, 
+                  parcel_data):
+    '''
+    Where available, reads in drainage data (points, lines) and calculates distance
+    to drainage system for each site. If there is no drainage data available for the town,
+    distance is set to -999.
+
+    Inputs:
+    - town name
+    - id field
+    - parcel data
+    - drainage data (read in function, built manually)
+
+    Output: input parcel data with additional fields:
+    - 'dst_drn_ln': distance to nearest drainage pipe
+    - 'dst_drn_pt': distance to nearest catch basin
+
+    
+    '''
+    #first identify the drainage network 
     from src.data.make_dataset import drainage_network_gdb
 
     if any(town_name in s for s in fiona.listlayers(drainage_network_gdb)):
         #if town name is in the drainage network geodatabase, then run the following script to produce distance data
-        #otherwise fill with -999 (see 'else')
+
+        #find layer in drainage geodatabase by looking for town name and 'lines'
         for layer_name in fiona.listlayers(drainage_network_gdb):
             if town_name in layer_name:
                 if 'lines' in layer_name:
                     town_drainage_lines_layer = layer_name
 
+        #read in  layer
         town_drainage_lines = gpd.read_file(drainage_network_gdb, layer=town_drainage_lines_layer)
         town_drainage_lines = town_drainage_lines.explode().reset_index(drop=True)
 
+        #calculate distance from drainage lines 
         drainage_lines = calculate_suitability_criteria(how='distance', 
                                                         id_field=id_field,
                                                         parcel_data=parcel_data, 

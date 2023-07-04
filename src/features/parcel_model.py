@@ -42,7 +42,7 @@ from shapely.validation import make_valid
 from datetime import datetime
 
 
-from src.features.build_features import *
+from src.features.suitability_criteria import *
 from src.data.make_dataset import *
 from src.features.ms4_funcs import *
 
@@ -105,13 +105,37 @@ def parcel_ms4_model(town_name, processed_path):
 
     ## SUITABILITY MODEL ##
 
-    #does it have a public land use? or a public owner signal?
+    # PUBLIC LAND # 
 
     from src.data.public_uses import public_land_uses, owner_types
 
-    town_parcels_row['pblc'] = town_parcels_row['UseDesc'].apply(lambda x: 1 if x in public_land_uses else 0).astype(int)
-    town_parcels_row['pblc'] = town_parcels_row['Owner'].str.contains('|'.join(owner_types), na=False).astype(int)
+    #does it have a listed public use?
+    town_parcels_row['pblc_use'] = town_parcels_row['UseDesc'].apply(lambda x: 1 if x in public_land_uses else 0).astype(int)
+    
+    #does it have a listed public owner type
+    town_parcels_row['pblc_owner'] = town_parcels_row['Owner'].str.contains('|'.join(owner_types), na=False).astype(int)
+    
+    #create a field (pblc), 1 = has a public use or owner, 0 = neither 
+    public_rule = [
+        ((town_parcels_row['pblc_use'] == 1) | (town_parcels_row['pblc_owner'] == 1)),
+        ((town_parcels_row['pblc_use'] != 1) & (town_parcels_row['pblc_owner'] != 1))
+    ]
 
+    choices = [1, 0]
+
+    town_parcels_row['pblc'] = np.select(public_rule, choices, default=np.nan)
+    
+
+    town_parcels_row = town_parcels_row[['parloc_id', 
+                             'Address', 
+                             'Owner', 
+                             'UseDesc', 
+                             'muni', 
+                             'type', 
+                             'acreage', 
+                             'pblc', 
+                             'geometry']]
+    
     #how much imperviousness is on site?
     imperv = calculate_imperviousness(town_parcels_row, 
                                     'parloc_id', 
@@ -123,8 +147,7 @@ def parcel_ms4_model(town_name, processed_path):
                             id_field = 'parloc_id',
                             muni_name = town_name,
                             muni_gdf = muni_shp,
-                            lclu_layer=lclu_muni,
-                            pler_field='pler')
+                            lclu_layer=lclu_muni)
 
 
     #does it overlap with Trust for Public Land's "Park Serve" priority areas from 2022
@@ -132,7 +155,7 @@ def parcel_ms4_model(town_name, processed_path):
                                             id_field='parloc_id',
                                             parcel_data=town_parcels_row, 
                                             join_data=parkserve_data, 
-                                            field='ParkRank',
+                                            field=parkserve_field,
                                             layer_name='parks',
                                             overlap=0.05)
 
@@ -141,7 +164,7 @@ def parcel_ms4_model(town_name, processed_path):
                                                 id_field='parloc_id',
                                                 parcel_data=town_parcels_row, 
                                                 join_data=wetlands, 
-                                                field='IT_VALDESC',
+                                                field=wetlands_field,
                                                 layer_name='wtlnds',
                                                 overlap=0.05)
 
@@ -150,7 +173,7 @@ def parcel_ms4_model(town_name, processed_path):
                                                 id_field='parloc_id',
                                                 parcel_data=town_parcels_row, 
                                                 join_data=zone1_wpa, 
-                                                field='SUPPLIER',
+                                                field=zone1_wpa_field,
                                                 layer_name='z1_wpa',
                                                 overlap=0.05)
 
@@ -158,7 +181,7 @@ def parcel_ms4_model(town_name, processed_path):
                                                 id_field='parloc_id',
                                                 parcel_data=town_parcels_row, 
                                                 join_data=zone2_wpa, 
-                                                field='SUPPLIER',
+                                                field=zone2_wpa_field,
                                                 layer_name='z2_wpa',
                                                 overlap=0.05)
 
@@ -167,7 +190,7 @@ def parcel_ms4_model(town_name, processed_path):
                                                 id_field='parloc_id',
                                                 parcel_data=town_parcels_row, 
                                                 join_data=interim_wpa, 
-                                                field='SUPPLIER',
+                                                field=int_wpa_field,
                                                 layer_name='int_wpa',
                                                 overlap=0.05)
     
@@ -177,7 +200,7 @@ def parcel_ms4_model(town_name, processed_path):
                                                 parcel_data=town_parcels_row, 
                                                 points=True,
                                                 join_data=aul, 
-                                                field='NAME',
+                                                field=aul_field,
                                                 layer_name='aul',
                                                 overlap=0.05)
 
@@ -185,8 +208,8 @@ def parcel_ms4_model(town_name, processed_path):
     watershed = calculate_suitability_criteria(how='if_overlap', 
                                                 id_field='parloc_id',
                                                 parcel_data=town_parcels_row, 
-                                                join_data=subbasins, 
-                                                field='HU_10_NAME',
+                                                join_data=watersheds, 
+                                                field=watersheds_field,
                                                 layer_name='wtshd',
                                                 overlap=0.05)
 
@@ -223,7 +246,7 @@ def parcel_ms4_model(town_name, processed_path):
                                             id_field='parloc_id',
                                             parcel_data=town_parcels_row, 
                                             join_data=ej_2020, 
-                                            field='EJ_CRIT_DESC',
+                                            field=ej_field,
                                             layer_name='ej',
                                             overlap=0.05)
     
@@ -254,7 +277,9 @@ def parcel_ms4_model(town_name, processed_path):
                                             layer_name='soils',
                                             overlap=0.05)
 
+    # MERGE DATA FRAMES #
 
+    #create list of dataframes to merge
     dfs = [town_parcels_row[['parloc_id', 
                              'Address', 
                              'Owner', 
@@ -264,21 +289,21 @@ def parcel_ms4_model(town_name, processed_path):
                              'acreage', 
                              'pblc', 
                              'geometry']], 
-        imperv,
-        imperv_pler,
-        parkserve,
-        wetlands_ovlp,
-        wpa_z1_ovlp_tess,
-        wpa_z2_ovlp_tess,
-        wpa_interim_ovlp_tess,
-        aul_ovlp,
-        watershed,
-        tree_need,
-        heat_vln,
-        ej,
-        comm_vis,
-        soils,
-        drainage        
+            imperv,
+            imperv_pler,
+            parkserve,
+            wetlands_ovlp,
+            wpa_z1_ovlp_tess,
+            wpa_z2_ovlp_tess,
+            wpa_interim_ovlp_tess,
+            aul_ovlp,
+            watershed,
+            tree_need,
+            heat_vln,
+            ej,
+            comm_vis,
+            soils,
+            drainage        
     ]
 
     #merge all of the listed dataframes together based on their parcel id and geometry
@@ -288,6 +313,7 @@ def parcel_ms4_model(town_name, processed_path):
                                                     how='outer'), 
                                                     dfs)
     
+    #create parcel type field that identifies whether a site is ROW, Public, or private
     def conditions(row):
         if row['type'] == 'ROW segment':
             val = 'ROW segment'
@@ -297,11 +323,10 @@ def parcel_ms4_model(town_name, processed_path):
             val = 'Private parcel'
         return val
         
-    #add a "parcel type" field for pub, priv, and row
     df_merged['par_typ'] =  df_merged.apply(conditions, axis=1)
 
   
-
+    #move geometry field to end
     df_merged.insert((len(df_merged.columns) - 1), 'geometry', df_merged.pop('geometry'))
 
 

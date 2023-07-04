@@ -46,6 +46,7 @@ public_land_uses = [
     'Bus Transportation Facilities and Related Properties',
     'IMPUTED - Housing Authority',
     'Housing Authority',
+    'Housing Authority',
     'Vacant, Housing Authority',
     'Improved, Tax Title/Treasurer',
     'Vacant, Tax Title/Treasurer',
