@@ -144,7 +144,8 @@ def get_lclu_muni(muni_gdf):
 
     #fix any geometry issues
     lclu.geometry = lclu.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
-    lclu = lclu.loc[lclu['geometry'].geom_type == 'Polygon']
+    #lclu = lclu.loc[lclu['geometry'].geom_type == 'Polygon']
+    lclu['geometry'] = lclu['geometry'].buffer(0)
     lclu = lclu.clip(muni_gdf)
     #lclu.geometry = lclu.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
     lclu = lclu.loc[lclu['geometry'].geom_type == 'Polygon']
@@ -165,13 +166,13 @@ def get_tree_canopy_lc(lclu_muni):
     
     from src.data.make_dataset import tree_canopy_covernames
 
-    lclu_treecanopy = lclu_muni.loc[lclu_muni['covername'].isin(tree_canopy_covernames)]
-
-    lclu_treecanopy.geometry = lclu_treecanopy.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
+    lclu_treecanopy = lclu_muni.loc[
+        lclu_muni['covername'].isin(tree_canopy_covernames)]
 
     #fix geom inconsistnecies
     lclu_treecanopy = lclu_treecanopy.explode()
     lclu_treecanopy = lclu_treecanopy.loc[lclu_treecanopy['geometry'].geom_type == 'Polygon']
+    lclu_treecanopy.geometry = lclu_treecanopy.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
     return lclu_treecanopy
 
 

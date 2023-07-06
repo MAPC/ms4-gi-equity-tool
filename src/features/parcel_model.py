@@ -82,26 +82,6 @@ def parcel_ms4_model(town_name, processed_path):
     #then get land cover for tree canopy only
     lclu_treecanopy = get_tree_canopy_lc(lclu_muni) #from src.features.ms4_funcs.py 
 
-    # IMPERVIOUSNESS # 
-
-    '''   
-    #select only imperviousness land cover codes and fix gemoetry issues
-    lclu_impervious = lclu_muni.loc[lclu_muni['covercode'] == 2]
-    lclu_impervious.geometry = lclu_impervious.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
-
-    #read in structures for the muni
-    building_structures = gpd.read_file(building_structures_gdb, layer=building_structures_layer, mask=muni_shp)
-
-    #add a type field
-    building_structures['type'] = 'rooftop'
-
-    #erase structures from the imperviousness lclu layer
-    #now we just have land cover (not rooftops) that are imperviousness
-    imperv_cover = lclu_impervious.overlay(building_structures, how='difference')
-
-    #add a type field
-    imperv_cover['type'] = 'land cover'    
-    '''
 
     ## SUITABILITY MODEL ##
 
