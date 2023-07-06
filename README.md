@@ -1,5 +1,6 @@
 ms4-gi-equity-tool
 ==============================
+Documentation can be found at this link: https://mapc.gitbook.io/ms4-analysis-documentation/
 
 
 
