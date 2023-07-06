@@ -64,7 +64,8 @@ def get_parcels_row(town_name, muni_gdf):
         #add muni and type fields
         town_parcels['muni'] = town_name 
         town_parcels['type'] = 'parcel'
-    
+        town_parcels['acreage'] = town_parcels['geometry'].area / 4047
+        
     else: #for towns not in 3a list
         for layer_name in fiona.listlayers(ms4_model_gdb):
             if town_name in layer_name:
