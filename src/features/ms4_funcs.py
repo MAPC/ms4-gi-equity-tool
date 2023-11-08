@@ -267,7 +267,7 @@ def calculate_imperviousness(parcel_data,
     building_structures['type'] = 'rooftop'
 
     #erase structures from the imperviousness lclu layer
-    #now we just have land cover (not rooftops) that are imperviousness
+    #now we just have land cover (not rooftops) that are impervious
     imperv_cover = imprv_cover_layer.overlay(building_structures, how='difference')
 
     #add a type field
@@ -277,7 +277,7 @@ def calculate_imperviousness(parcel_data,
     imperv_surfaces = calculate_suitability_criteria(how='overlap_area', 
                                                 id_field=id_field,
                                                 parcel_data=parcel_data, 
-                                                join_data=imprv_cover_layer, 
+                                                join_data=imperv_cover, 
                                                 field='type',
                                                 layer_name='imp_cvr')
 
@@ -295,7 +295,6 @@ def calculate_imperviousness(parcel_data,
                                 on=id_field, 
                                 how='outer').fillna(0)
         
-
     # use output from overlap_area and merge to create usable fields
     imperv['sqm_imprv'] = imperv['sqm_imp_cvr'] + imperv['sqm_imp_rf']
     imperv['pct_imprv'] = (imperv['sqm_imprv'] / imperv['geometry'].area) * 100
@@ -402,20 +401,18 @@ def soil_hsg_score(muni_shapefile):
     return soils_hsg
 
 
+
 def get_P_load (parcel_data, 
                 id_field,
-                muni_name,
-                muni_gdf,
                 lclu_layer):
 
     '''
-    For each parcel, calculates phosphorous load using raster stats.
+    For each parcel, calculates phosphorous load for impervious surfaces on the parcel.
 
     Inputs:
     - Parcel data for muni + id field 
-    - Name of muni (for naming clipped raster)
     
-    Output: Input parcel data with id, geometry, and new fields:
+    Output: 
     - P_per_acre - total Phosphorus load per acre of land on site
     - P_sum - total Phosphorus load on site
 
@@ -423,68 +420,35 @@ def get_P_load (parcel_data,
 
     '''
 
-    from rasterio.mask import mask
-    from src.data.make_dataset import pler_field
+    #only for impervious surfaces
+    imperv_lc = lclu_layer[lclu_layer['covercode'] == 2]
+    imperv_lc.geometry = imperv_lc.apply(lambda row: make_valid(row.geometry) if not row.geometry.is_valid else row.geometry, axis=1)
+
+    #only keep parts of lclu imperviousness that intersects with parcels, break into parcel shapes
+    parcels_lclu_intersect = imperv_lc.overlay(parcel_data, how='intersection')
+
+    #add an acres field for each intersected lclu area
+    parcels_lclu_intersect['acres'] = parcels_lclu_intersect.area / 4047
+
+    #calculate pounds of phosphorus by multiplying pler multiplier by the size (in acres) of the land use geometry
+    parcels_lclu_intersect['p_load'] = parcels_lclu_intersect['pler'] * parcels_lclu_intersect['acres']
+
+    #get the sum of P on each parcel through a "groupby" by parcel id
+    parcels_nutrient_load = parcels_lclu_intersect.groupby(by=id_field).agg({('p_load'):'sum',}).reset_index()
     
+    #renaming to be consistent with the original calculation
+    parcels_nutrient_load = parcels_nutrient_load.rename(columns={'p_load': 'P_sum'})
 
-    inRas = 'I:\\Elevation\\Lidar\\2023_MassGIS\\LiDAR_DEM_INT_16bit.tiff'
-    outRas = 'I:\\Elevation\\Lidar\\2023_MassGIS\\' + muni_name + '_LiDAR_DEM_INT_16bit.tiff'
+    #merge to parcel data
+    parcels_with_load = parcel_data.merge(parcels_nutrient_load[[id_field, 'P_sum']], on=id_field, how='left')
 
+    #add P per acre
+    parcels_with_load['P_per_acre'] = parcels_with_load['P_sum'] / (parcels_with_load['geometry'].area / 4047)
 
-    #clip the dem to the muni, save to I drive folder
-    with rasterio.open(inRas) as src:
-        #update crs
-        src.meta.update({
-            'crs': muni_gdf.crs
-            })
-        out_image, out_transform= mask(src,muni_gdf.geometry,crop=True)
-        out_meta=src.meta.copy() # copy the metadata of the source DEM
+    #minimize field names in table
+    parcels_with_load = parcels_with_load[[id_field, 'P_per_acre', 'P_sum', 'geometry']]
 
-        
-    out_meta.update({
-        "driver":"Gtiff",
-        "height":out_image.shape[1], # height starts with shape[1]
-        "width":out_image.shape[2], # width starts with shape[2]
-        "transform":out_transform
-    })
-
-
-    with rasterio.open(outRas,'w',**out_meta) as dst:
-        dst.write(out_image)
-
-    #need to transform pler into a raster otherwise this takes a really long time
-    vector = lclu_layer[lclu_layer['covercode'] == 2]
-    
-    geom = [shapes for shapes in vector.geometry]
-    geom_value = ((geom,value) for geom, value in zip(vector.geometry, vector[pler_field]))
-
-    with rasterio.open(outRas) as raster:
-
-        # Rasterize vector using the shape and transform of the raster
-        rasterized = features.rasterize(geom_value,
-                                        out_shape = raster.shape,
-                                        transform = raster.transform,
-                                        all_touched = True,
-                                        fill = np.nan,   # background value
-                                        merge_alg = MergeAlg.replace,
-                                        dtype = np.float64)
-
-
-        #run zonal statistics on pler raster
-        pler_stats = pd.DataFrame(zonal_stats(parcel_data, 
-                                                rasterized, 
-                                                affine=raster.transform, 
-                                                stats='sum'))
-
-    parcel_pler_stats = parcel_data[[id_field, 'geometry']].join(pler_stats)
-    parcel_pler_stats = parcel_pler_stats.rename(columns={'sum':'P_sum'})
-    parcel_pler_stats['P_per_acre'] = parcel_pler_stats['P_sum'] / (parcel_pler_stats['geometry'].area / 4047)
-
-    os.remove(outRas)
-
-    return parcel_pler_stats
-
-
+    return parcels_with_load
 
 def comm_vis_layer(id_field, 
                    parcel_data, 

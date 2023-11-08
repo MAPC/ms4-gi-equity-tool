@@ -125,10 +125,7 @@ def parcel_ms4_model(town_name, processed_path):
     #what is the imperviousness pler on site?
     imperv_pler = get_P_load(parcel_data=town_parcels_row,
                             id_field = 'parloc_id',
-                            muni_name = town_name,
-                            muni_gdf = muni_shp,
                             lclu_layer=lclu_muni)
-
 
     #does it overlap with Trust for Public Land's "Park Serve" priority areas from 2022
     parkserve = calculate_suitability_criteria(how='if_overlap', 

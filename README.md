@@ -15,9 +15,7 @@ Project Organization
     │
     ├── models             <- Trained and serialized models, model predictions, or model summaries
     │
-    ├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-    │                         the creator's initials, and a short `-` delimited description, e.g.
-    │                         `1.0-jqp-initial-data-exploration`.
+    ├── notebooks          <- Jupyter notebooks
     │   └── 1-run-ms4-parcel-model.ipynb    <- runs src > features > parcel_model.py
     ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
     │
@@ -45,8 +43,6 @@ Project Organization
     │   │   └── row_segmentation.py     <- generates right-of-way segments
     │   │
     │
-    └── tox.ini            <- tox file with settings for running tox; see tox.readthedocs.io
-
 
 --------
 
